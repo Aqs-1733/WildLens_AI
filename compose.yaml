@@ -1,0 +1,57 @@
+name: wildlens-ai
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: wildlens
+      POSTGRES_USER: wildlens
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-wildlens_dev}
+    volumes:
+      - wildlens_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wildlens -d wildlens"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+    env_file:
+      - .env
+    environment:
+      APP_HOST: 0.0.0.0
+      APP_PORT: 8010
+      DATABASE_URL: postgresql+psycopg://wildlens:${POSTGRES_PASSWORD:-wildlens_dev}@db:5432/wildlens
+      CORS_ORIGINS: http://localhost:5174,http://127.0.0.1:5174,http://localhost,capacitor://localhost
+    volumes:
+      - ./storage:/app/storage
+      - ./models:/app/models:ro
+      - ./data:/app/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8010:8010"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8010/api/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - "5174:80"
+    restart: unless-stopped
+
+volumes:
+  wildlens_db:

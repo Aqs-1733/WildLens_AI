@@ -1,0 +1,533 @@
+[
+  {
+    "common_name": "东北虎",
+    "scientific_name": "Panthera tigris altaica",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "WCS+AmurTiger",
+    "notes": "个体重识别重点"
+  },
+  {
+    "common_name": "金钱豹",
+    "scientific_name": "Panthera pardus",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "WCS+SWG",
+    "notes": "大型猫科"
+  },
+  {
+    "common_name": "雪豹",
+    "scientific_name": "Panthera uncia",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "高山场景"
+  },
+  {
+    "common_name": "亚洲黑熊",
+    "scientific_name": "Ursus thibetanus",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "WCS+SWG",
+    "notes": "黑熊与棕熊区分"
+  },
+  {
+    "common_name": "棕熊",
+    "scientific_name": "Ursus arctos",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "大型兽类"
+  },
+  {
+    "common_name": "大熊猫",
+    "scientific_name": "Ailuropoda melanoleuca",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "公开数据较少需谨慎"
+  },
+  {
+    "common_name": "梅花鹿",
+    "scientific_name": "Cervus nippon",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "WCS",
+    "notes": "演示主类"
+  },
+  {
+    "common_name": "马鹿",
+    "scientific_name": "Cervus elaphus",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "与梅花鹿相似"
+  },
+  {
+    "common_name": "狍",
+    "scientific_name": "Capreolus pygargus",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "WCS",
+    "notes": "相似物种对比"
+  },
+  {
+    "common_name": "麂",
+    "scientific_name": "Muntiacus reevesi",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "SWG",
+    "notes": "亚洲森林常见"
+  },
+  {
+    "common_name": "野猪",
+    "scientific_name": "Sus scrofa",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "WCS+SWG",
+    "notes": "常见目标"
+  },
+  {
+    "common_name": "狼",
+    "scientific_name": "Canis lupus",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "WCS",
+    "notes": "犬科"
+  },
+  {
+    "common_name": "赤狐",
+    "scientific_name": "Vulpes vulpes",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "WCS",
+    "notes": "夜间目标"
+  },
+  {
+    "common_name": "豹猫",
+    "scientific_name": "Prionailurus bengalensis",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "SWG",
+    "notes": "小型猫科"
+  },
+  {
+    "common_name": "亚洲金猫",
+    "scientific_name": "Catopuma temminckii",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "SWG",
+    "notes": "珍稀小型猫科"
+  },
+  {
+    "common_name": "猕猴",
+    "scientific_name": "Macaca mulatta",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "SWG",
+    "notes": "群体行为"
+  },
+  {
+    "common_name": "中华穿山甲",
+    "scientific_name": "Manis pentadactyla",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "SWG",
+    "notes": "数据稀缺"
+  },
+  {
+    "common_name": "豪猪",
+    "scientific_name": "Hystrix brachyura",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P0",
+    "planned_source": "SWG",
+    "notes": "夜间目标"
+  },
+  {
+    "common_name": "黄鼬",
+    "scientific_name": "Mustela sibirica",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "小型兽类"
+  },
+  {
+    "common_name": "貉",
+    "scientific_name": "Nyctereutes procyonoides",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "犬科"
+  },
+  {
+    "common_name": "亚洲象",
+    "scientific_name": "Elephas maximus",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "大型兽类"
+  },
+  {
+    "common_name": "羚牛",
+    "scientific_name": "Budorcas taxicolor",
+    "kingdom": "Animalia",
+    "category": "mammal",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "山地场景"
+  },
+  {
+    "common_name": "丹顶鹤",
+    "scientific_name": "Grus japonensis",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P0",
+    "planned_source": "WCS+iNaturalist",
+    "notes": "湿地重点"
+  },
+  {
+    "common_name": "东方白鹳",
+    "scientific_name": "Ciconia boyciana",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P1",
+    "planned_source": "WCS+iNaturalist",
+    "notes": "湿地珍稀鸟"
+  },
+  {
+    "common_name": "苍鹭",
+    "scientific_name": "Ardea cinerea",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P0",
+    "planned_source": "iNaturalist",
+    "notes": "常见水鸟"
+  },
+  {
+    "common_name": "白鹭",
+    "scientific_name": "Egretta garzetta",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P0",
+    "planned_source": "iNaturalist",
+    "notes": "常见水鸟"
+  },
+  {
+    "common_name": "朱鹮",
+    "scientific_name": "Nipponia nippon",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P1",
+    "planned_source": "iNaturalist",
+    "notes": "重点保护"
+  },
+  {
+    "common_name": "中华秋沙鸭",
+    "scientific_name": "Mergus squamatus",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P1",
+    "planned_source": "iNaturalist",
+    "notes": "水鸟"
+  },
+  {
+    "common_name": "红腹锦鸡",
+    "scientific_name": "Chrysolophus pictus",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P0",
+    "planned_source": "WCS",
+    "notes": "林下鸟类"
+  },
+  {
+    "common_name": "褐马鸡",
+    "scientific_name": "Crossoptilon mantchuricum",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P1",
+    "planned_source": "WCS",
+    "notes": "珍稀鸟类"
+  },
+  {
+    "common_name": "金雕",
+    "scientific_name": "Aquila chrysaetos",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P1",
+    "planned_source": "iNaturalist",
+    "notes": "猛禽"
+  },
+  {
+    "common_name": "绿孔雀",
+    "scientific_name": "Pavo muticus",
+    "kingdom": "Animalia",
+    "category": "bird",
+    "priority": "P1",
+    "planned_source": "SWG",
+    "notes": "亚洲森林"
+  },
+  {
+    "common_name": "扬子鳄",
+    "scientific_name": "Alligator sinensis",
+    "kingdom": "Animalia",
+    "category": "reptile",
+    "priority": "P1",
+    "planned_source": "iNaturalist",
+    "notes": "爬行动物"
+  },
+  {
+    "common_name": "中华鳖",
+    "scientific_name": "Pelodiscus sinensis",
+    "kingdom": "Animalia",
+    "category": "reptile",
+    "priority": "P2",
+    "planned_source": "iNaturalist",
+    "notes": "水生爬行类"
+  },
+  {
+    "common_name": "中华蜜蜂",
+    "scientific_name": "Apis cerana",
+    "kingdom": "Animalia",
+    "category": "insect",
+    "priority": "P2",
+    "planned_source": "iNaturalist",
+    "notes": "传粉昆虫"
+  },
+  {
+    "common_name": "中华虎凤蝶",
+    "scientific_name": "Luehdorfia chinensis",
+    "kingdom": "Animalia",
+    "category": "insect",
+    "priority": "P1",
+    "planned_source": "iNaturalist",
+    "notes": "重点昆虫"
+  },
+  {
+    "common_name": "银杏",
+    "scientific_name": "Ginkgo biloba",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P0",
+    "planned_source": "PlantNet-300K",
+    "notes": "裸子植物"
+  },
+  {
+    "common_name": "水杉",
+    "scientific_name": "Metasequoia glyptostroboides",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P0",
+    "planned_source": "PlantNet-300K",
+    "notes": "珍稀树种"
+  },
+  {
+    "common_name": "珙桐",
+    "scientific_name": "Davidia involucrata",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P0",
+    "planned_source": "PlantNet-300K",
+    "notes": "重点保护"
+  },
+  {
+    "common_name": "桫椤",
+    "scientific_name": "Alsophila spinulosa",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P0",
+    "planned_source": "PlantNet-300K",
+    "notes": "木本蕨类"
+  },
+  {
+    "common_name": "金花茶",
+    "scientific_name": "Camellia nitidissima",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P0",
+    "planned_source": "PlantNet-300K",
+    "notes": "珍稀山茶"
+  },
+  {
+    "common_name": "红豆杉",
+    "scientific_name": "Taxus chinensis",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P0",
+    "planned_source": "PlantNet-300K",
+    "notes": "重点保护"
+  },
+  {
+    "common_name": "望天树",
+    "scientific_name": "Parashorea chinensis",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "热带雨林"
+  },
+  {
+    "common_name": "秃杉",
+    "scientific_name": "Taiwania cryptomerioides",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "珍稀针叶树"
+  },
+  {
+    "common_name": "荷花",
+    "scientific_name": "Nelumbo nucifera",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P0",
+    "planned_source": "PlantNet-300K",
+    "notes": "湿地植物"
+  },
+  {
+    "common_name": "芦苇",
+    "scientific_name": "Phragmites australis",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P0",
+    "planned_source": "PlantNet-300K",
+    "notes": "湿地指示"
+  },
+  {
+    "common_name": "香蒲",
+    "scientific_name": "Typha orientalis",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "湿地植物"
+  },
+  {
+    "common_name": "睡莲",
+    "scientific_name": "Nymphaea tetragona",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "水生植物"
+  },
+  {
+    "common_name": "银杉",
+    "scientific_name": "Cathaya argyrophylla",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "珍稀针叶树"
+  },
+  {
+    "common_name": "台湾杉",
+    "scientific_name": "Taiwania cryptomerioides",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "需处理同义名"
+  },
+  {
+    "common_name": "华盖木",
+    "scientific_name": "Manglietiastrum sinicum",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "珍稀木本"
+  },
+  {
+    "common_name": "伯乐树",
+    "scientific_name": "Bretschneidera sinensis",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "重点保护"
+  },
+  {
+    "common_name": "连香树",
+    "scientific_name": "Cercidiphyllum japonicum",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "古老树种"
+  },
+  {
+    "common_name": "鹅掌楸",
+    "scientific_name": "Liriodendron chinense",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "木兰类"
+  },
+  {
+    "common_name": "水青树",
+    "scientific_name": "Tetracentron sinense",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "古老被子植物"
+  },
+  {
+    "common_name": "独叶草",
+    "scientific_name": "Kingdonia uniflora",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "高山小型草本"
+  },
+  {
+    "common_name": "水蕨",
+    "scientific_name": "Ceratopteris thalictroides",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "湿地蕨类"
+  },
+  {
+    "common_name": "野大豆",
+    "scientific_name": "Glycine soja",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "作物野生近缘种"
+  },
+  {
+    "common_name": "东北红豆杉",
+    "scientific_name": "Taxus cuspidata",
+    "kingdom": "Plantae",
+    "category": "plant",
+    "priority": "P1",
+    "planned_source": "PlantNet-300K",
+    "notes": "与红豆杉需区分"
+  }
+]

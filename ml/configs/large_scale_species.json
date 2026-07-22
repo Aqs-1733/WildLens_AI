@@ -1,0 +1,39 @@
+{
+  "project": "wildlens_species_large_scale",
+  "task": "hierarchical_species_classification",
+  "target_classes": 1000,
+  "minimum_images_per_class": 300,
+  "maximum_images_per_class": 5000,
+  "sources": [
+    "iNaturalist 2021",
+    "WCS Camera Traps",
+    "SWG Camera Traps 2018-2020",
+    "Pl@ntNet-300K",
+    "人工复核回流集"
+  ],
+  "taxonomy_levels": ["kingdom", "phylum", "class", "order", "family", "genus", "species"],
+  "split": {
+    "train": 0.7,
+    "validation": 0.15,
+    "test": 0.15,
+    "group_by": ["camera_id", "location_id", "observation_id", "sequence_id"]
+  },
+  "training": {
+    "backbone": "convnext_tiny",
+    "image_size": 384,
+    "epochs": 40,
+    "batch_size": 48,
+    "optimizer": "adamw",
+    "learning_rate": 0.0002,
+    "label_smoothing": 0.1,
+    "class_balanced_sampling": true,
+    "mixed_precision": true,
+    "early_stopping_patience": 8
+  },
+  "acceptance": {
+    "macro_f1_min": 0.7,
+    "top5_accuracy_min": 0.9,
+    "unknown_rejection_required": true,
+    "per_class_recall_report": true
+  }
+}

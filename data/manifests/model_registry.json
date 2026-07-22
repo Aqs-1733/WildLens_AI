@@ -1,0 +1,90 @@
+[
+  {
+    "id": "opencv-motion-v1",
+    "task": "candidate_detection",
+    "status": "builtin",
+    "format": "python",
+    "path": "backend/vision/pipeline.py",
+    "metrics": {
+      "mode": "启发式候选区，不声明mAP"
+    },
+    "license": "项目代码许可"
+  },
+  {
+    "id": "ark-vision-review",
+    "task": "crop_species_review",
+    "status": "configured",
+    "format": "api",
+    "path": "ARK OpenAI-compatible vision",
+    "metrics": {
+      "mode": "限量候选框语义复核"
+    },
+    "license": "火山方舟服务条款"
+  },
+  {
+    "id": "megadetector-v6",
+    "task": "animal_person_vehicle_detection",
+    "status": "optional_download",
+    "format": "pt/onnx",
+    "path": "models/pretrained/megadetector_v6.pt",
+    "metrics": {
+      "mode": "官方预训练模型"
+    },
+    "license": "以官方仓库为准"
+  },
+  {
+    "id": "speciesnet",
+    "task": "species_classification",
+    "status": "optional_download",
+    "format": "savedmodel/onnx",
+    "path": "models/pretrained/speciesnet",
+    "metrics": {
+      "labels": ">2000"
+    },
+    "license": "以Google camera trap AI仓库为准"
+  },
+  {
+    "id": "wildlife-species-v1",
+    "task": "target_species_classification",
+    "status": "train_required",
+    "format": "onnx",
+    "path": "models/onnx/wildlife_species.onnx",
+    "metrics": {
+      "target": "macro-F1、top-1、top-5"
+    },
+    "license": "由训练数据许可共同约束"
+  },
+  {
+    "id": "fire-smoke-v1",
+    "task": "fire_smoke_detection",
+    "status": "train_required",
+    "format": "onnx",
+    "path": "models/onnx/fire_smoke.onnx",
+    "metrics": {
+      "target": "mAP50、Recall"
+    },
+    "license": "由D-Fire等训练数据许可共同约束"
+  },
+  {
+    "id": "animal-behavior-v1",
+    "task": "animal_behavior_classification",
+    "status": "train_required",
+    "format": "onnx",
+    "path": "models/onnx/animal_behavior.onnx",
+    "metrics": {
+      "target": "Macro-F1、跨物种Recall"
+    },
+    "license": "由Animal Kingdom、MammalNet和回流数据许可共同约束"
+  },
+  {
+    "id": "natural-phenomena-v1",
+    "task": "natural_phenomena_multilabel",
+    "status": "train_required",
+    "format": "onnx",
+    "path": "models/onnx/natural_phenomena.onnx",
+    "metrics": {
+      "target": "Macro-F1、风险类Recall"
+    },
+    "license": "由天气、DAWN、D-Fire和人工图片许可共同约束"
+  }
+]

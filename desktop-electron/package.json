@@ -1,0 +1,13 @@
+{
+  "name": "shijing-electron-shell",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Optional desktop shell for the 识境 science app",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "devDependencies": {
+    "electron": "^39.0.0"
+  }
+}

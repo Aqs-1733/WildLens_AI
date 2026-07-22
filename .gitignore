@@ -1,0 +1,48 @@
+# Secrets and local environment
+.env
+.env.*
+!.env.example
+.venv/
+.venv-speciesnet-cpu/
+
+# Python/runtime caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+wildlens_ai.egg-info/
+
+# Frontend build artifacts
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+# Local app state, uploaded media, generated outputs, and caches
+storage/**
+!storage/
+!storage/**/
+!storage/**/.gitkeep
+
+# Model weights and generated model artifacts
+models/checkpoints/
+models/pretrained/
+models/trained/
+models/onnx/
+models/speciesnet_offline/
+
+# Datasets and local processing outputs
+data/raw/
+data/processed/
+
+# Databases, packages, logs, and OS files
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+dist/
+.DS_Store

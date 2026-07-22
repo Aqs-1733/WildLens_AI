@@ -1,0 +1,17 @@
+{
+  "project": "wildlens_natural_phenomena",
+  "task": "multi_label_scene_classification",
+  "classes": [
+    "rain", "snow", "fog", "frost", "dew", "lightning", "rainbow", "halo",
+    "aurora", "cloud_sea", "sandstorm", "smoke", "wildfire", "strong_wind"
+  ],
+  "sources": ["Weather Image Recognition", "DAWN", "D-Fire", "人工许可图片"],
+  "backbone": "efficientnet_v2_s",
+  "image_size": 384,
+  "multi_label": true,
+  "acceptance": {
+    "macro_f1_min": 0.75,
+    "minimum_confidence_for_ui": 0.6,
+    "human_review_for_hazard_labels": true
+  }
+}
