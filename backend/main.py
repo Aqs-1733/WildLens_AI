@@ -22,6 +22,7 @@ from backend.core.config import get_settings
 from backend.core.database import Base, SessionLocal, engine
 from backend.routers import alerts, auth, compat, dashboard, identify, qa, reports, review, social, species, system, videos
 from backend.seed import seed_database
+from backend.vision.bioclip_classifier import bioclip_classifier
 
 settings = get_settings()
 logging.basicConfig(
@@ -40,6 +41,10 @@ async def lifespan(_: FastAPI):
     Base.metadata.create_all(bind=engine)
     with SessionLocal() as db:
         seed_database(db)
+    if settings.bioclip_preload_model:
+        bioclip_classifier.preload_model(background=True)
+    if settings.bioclip_preload_index:
+        bioclip_classifier.preload_index(background=True)
     yield
 
 

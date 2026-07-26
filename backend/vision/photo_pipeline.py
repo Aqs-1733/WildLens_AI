@@ -605,7 +605,18 @@ async def analyze_photo(
                 top_k=settings.bioclip_top_k,
             )
             crop_area_ratio = float(bbox["width"] * bbox["height"])
-            if crop_area_ratio < 0.92:
+            crop_similarity = _clamp((bioclip_result or {}).get("bioclip_similarity") or 0.0)
+            needs_full_fallback = (
+                bool(getattr(settings, "bioclip_full_image_fallback", True))
+                and crop_area_ratio < 0.92
+                and (
+                    not bool(getattr(settings, "bioclip_full_image_fallback_weak_only", True))
+                    or not bioclip_result
+                    or bool(bioclip_result.get("bioclip_is_weak"))
+                    or crop_similarity < float(settings.bioclip_min_similarity) + 0.03
+                )
+            )
+            if needs_full_fallback:
                 if not full_bioclip_attempted:
                     full_bioclip_attempted = True
                     full_bioclip_result, full_bioclip_error = bioclip_classifier.safe_predict(

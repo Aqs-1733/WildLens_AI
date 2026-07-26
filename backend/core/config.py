@@ -118,7 +118,14 @@ class Settings(BaseSettings):
     )
     bioclip_device: str = "cpu"
     bioclip_top_k: int = 10
-    bioclip_batch_size: int = 4096
+    bioclip_batch_size: int = 16384
+    bioclip_search_backend: str = "memory"
+    bioclip_index_dtype: str = "float16"
+    bioclip_preload_index: bool = True
+    bioclip_preload_model: bool = True
+    bioclip_query_cache_size: int = 128
+    bioclip_full_image_fallback: bool = True
+    bioclip_full_image_fallback_weak_only: bool = True
     bioclip_min_similarity: float = 0.55
     bioclip_strong_similarity: float = 0.78
     bioclip_min_margin: float = 0.01

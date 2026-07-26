@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import heapq
+import hashlib
 import logging
 import math
 import os
 import sqlite3
 import threading
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -55,6 +57,23 @@ class PrototypeHit:
     queue_taxon_id: str
     scientific_name: str
     image_count: int
+
+
+@dataclass(slots=True)
+class PrototypeIndex:
+    vectors: np.ndarray
+    queue_taxon_ids: list[str]
+    scientific_names: list[str]
+    image_counts: np.ndarray
+    db_path: str
+    db_mtime_ns: int
+    db_size: int
+    dtype_name: str
+    load_ms: float
+
+    @property
+    def total(self) -> int:
+        return int(self.vectors.shape[0])
 
 
 def _clean_category(value: Any) -> str:
@@ -121,6 +140,13 @@ class CompactBioCLIPClassifier:
         self._load_error: str | None = None
         self._load_lock = threading.Lock()
         self._predict_lock = threading.Lock()
+        self._model_preload_started = False
+        self._index: PrototypeIndex | None = None
+        self._index_lock = threading.Lock()
+        self._index_error: str | None = None
+        self._index_preload_started = False
+        self._search_cache: OrderedDict[str, dict[str, Any]] = OrderedDict()
+        self._search_cache_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
@@ -224,6 +250,211 @@ class CompactBioCLIPClassifier:
             raise BioCLIPError(f"cannot read image: {image_path}")
         return self.encode_image(image)
 
+    def _index_dtype(self) -> np.dtype:
+        requested = str(getattr(self.settings, "bioclip_index_dtype", "float16") or "float16").lower()
+        if requested == "float32":
+            return np.dtype(np.float32)
+        return np.dtype(np.float16)
+
+    def _search_backend(self) -> str:
+        backend = str(getattr(self.settings, "bioclip_search_backend", "memory") or "memory").strip().lower()
+        return backend if backend in {"memory", "sqlite", "auto"} else "memory"
+
+    def _database_signature(self) -> tuple[str, int, int]:
+        stat = self.database_path.stat()
+        return (str(self.database_path.resolve()), int(stat.st_mtime_ns), int(stat.st_size))
+
+    def _index_is_current(self, index: PrototypeIndex | None) -> bool:
+        if index is None:
+            return False
+        try:
+            db_path, db_mtime_ns, db_size = self._database_signature()
+        except OSError:
+            return False
+        return (
+            index.db_path == db_path
+            and index.db_mtime_ns == db_mtime_ns
+            and index.db_size == db_size
+            and index.dtype_name == self._index_dtype().name
+        )
+
+    def _load_prototype_index(self) -> PrototypeIndex:
+        if not self.database_path.is_file():
+            raise BioCLIPError(f"BioCLIP prototype database not found: {self.database_path}")
+        db_path, db_mtime_ns, db_size = self._database_signature()
+        dtype = self._index_dtype()
+        started = time.perf_counter()
+        safe_batch_size = max(512, int(self.settings.bioclip_batch_size or 4096))
+        connection = sqlite3.connect(f"file:{self.database_path.as_posix()}?mode=ro", uri=True, timeout=120)
+        connection.row_factory = sqlite3.Row
+        try:
+            total = int(
+                connection.execute(
+                    """
+                    SELECT COUNT(*)
+                    FROM species_prototypes
+                    WHERE model_name = ?
+                      AND embedding_dim = ?
+                      AND prototype IS NOT NULL
+                    """,
+                    (BIOCLIP_MODEL_ID, BIOCLIP_EMBEDDING_DIM),
+                ).fetchone()[0]
+            )
+            vectors = np.empty((total, BIOCLIP_EMBEDDING_DIM), dtype=dtype)
+            queue_taxon_ids = [""] * total
+            scientific_names = [""] * total
+            image_counts = np.zeros(total, dtype=np.int32)
+            cursor = connection.execute(
+                """
+                SELECT queue_taxon_id, scientific_name, image_count, prototype
+                FROM species_prototypes
+                WHERE model_name = ?
+                  AND embedding_dim = ?
+                  AND prototype IS NOT NULL
+                """,
+                (BIOCLIP_MODEL_ID, BIOCLIP_EMBEDDING_DIM),
+            )
+            offset = 0
+            while True:
+                rows = cursor.fetchmany(safe_batch_size)
+                if not rows:
+                    break
+                batch = np.empty((len(rows), BIOCLIP_EMBEDDING_DIM), dtype=np.float32)
+                for row_index, row in enumerate(rows):
+                    batch[row_index] = np.frombuffer(
+                        row["prototype"],
+                        dtype=np.float16,
+                        count=BIOCLIP_EMBEDDING_DIM,
+                    )
+                    absolute_index = offset + row_index
+                    queue_taxon_ids[absolute_index] = str(row["queue_taxon_id"] or "")
+                    scientific_names[absolute_index] = str(row["scientific_name"] or "")
+                    image_counts[absolute_index] = int(row["image_count"] or 0)
+                batch = batch / np.maximum(np.linalg.norm(batch, axis=1, keepdims=True), 1e-12)
+                end = offset + len(rows)
+                vectors[offset:end] = batch
+                offset = end
+        finally:
+            connection.close()
+
+        if offset != vectors.shape[0]:
+            vectors = vectors[:offset]
+            queue_taxon_ids = queue_taxon_ids[:offset]
+            scientific_names = scientific_names[:offset]
+            image_counts = image_counts[:offset]
+        return PrototypeIndex(
+            vectors=vectors,
+            queue_taxon_ids=queue_taxon_ids,
+            scientific_names=scientific_names,
+            image_counts=image_counts,
+            db_path=db_path,
+            db_mtime_ns=db_mtime_ns,
+            db_size=db_size,
+            dtype_name=dtype.name,
+            load_ms=round((time.perf_counter() - started) * 1000, 3),
+        )
+
+    def _get_prototype_index(self) -> PrototypeIndex | None:
+        backend = self._search_backend()
+        if backend == "sqlite":
+            return None
+        if self._index_is_current(self._index):
+            return self._index
+        with self._index_lock:
+            if self._index_is_current(self._index):
+                return self._index
+            try:
+                self._index = self._load_prototype_index()
+                self._index_error = None
+                logger.info(
+                    "BioCLIP prototype index loaded: prototypes=%s dtype=%s load_ms=%s",
+                    self._index.total,
+                    self._index.dtype_name,
+                    self._index.load_ms,
+                )
+                return self._index
+            except (MemoryError, sqlite3.Error, OSError, ValueError) as exc:
+                self._index = None
+                self._index_error = str(exc)
+                if backend == "auto":
+                    logger.warning("BioCLIP memory index unavailable; falling back to SQLite: %s", exc)
+                    return None
+                raise BioCLIPError(f"BioCLIP memory index unavailable: {exc}") from exc
+
+    def preload_index(self, *, background: bool = True) -> None:
+        if not self.enabled or self._search_backend() == "sqlite":
+            return
+        if background:
+            if self._index_preload_started or self._index_is_current(self._index):
+                return
+            self._index_preload_started = True
+
+            def runner() -> None:
+                try:
+                    self._get_prototype_index()
+                except BioCLIPError as exc:
+                    logger.warning("BioCLIP prototype index preload failed: %s", exc)
+
+            threading.Thread(target=runner, name="bioclip-index-preload", daemon=True).start()
+            return
+        self._get_prototype_index()
+
+    def preload_model(self, *, background: bool = True) -> None:
+        if not self.enabled or self._loaded:
+            return
+        if background:
+            if self._model_preload_started:
+                return
+            self._model_preload_started = True
+
+            def runner() -> None:
+                try:
+                    self._load_model()
+                except BioCLIPError as exc:
+                    logger.warning("BioCLIP model preload failed: %s", exc)
+
+            threading.Thread(target=runner, name="bioclip-model-preload", daemon=True).start()
+            return
+        self._load_model()
+
+    def _search_cache_key(self, query: np.ndarray, top_k: int) -> str:
+        digest = hashlib.blake2b(query.astype(np.float32, copy=False).tobytes(), digest_size=16).hexdigest()
+        try:
+            db_path, db_mtime_ns, db_size = self._database_signature()
+        except OSError:
+            db_path, db_mtime_ns, db_size = str(self.database_path), 0, 0
+        return f"{db_path}|{db_mtime_ns}|{db_size}|{top_k}|{digest}"
+
+    def _get_cached_search(self, key: str) -> dict[str, Any] | None:
+        max_size = max(0, int(getattr(self.settings, "bioclip_query_cache_size", 0) or 0))
+        if max_size <= 0:
+            return None
+        with self._search_cache_lock:
+            cached = self._search_cache.get(key)
+            if cached is None:
+                return None
+            self._search_cache.move_to_end(key)
+            return {
+                **cached,
+                "hits": list(cached.get("hits") or []),
+                "cache_hit": True,
+            }
+
+    def _put_cached_search(self, key: str, payload: dict[str, Any]) -> None:
+        max_size = max(0, int(getattr(self.settings, "bioclip_query_cache_size", 0) or 0))
+        if max_size <= 0:
+            return
+        cached = {
+            **payload,
+            "hits": list(payload.get("hits") or []),
+            "cache_hit": False,
+        }
+        with self._search_cache_lock:
+            self._search_cache[key] = cached
+            self._search_cache.move_to_end(key)
+            while len(self._search_cache) > max_size:
+                self._search_cache.popitem(last=False)
+
     def _prototype_count(self) -> int:
         connection = sqlite3.connect(f"file:{self.database_path.as_posix()}?mode=ro", uri=True, timeout=60)
         try:
@@ -256,13 +487,93 @@ class CompactBioCLIPClassifier:
         safe_top_k = max(1, min(int(top_k or self.settings.bioclip_top_k or 10), 50))
         safe_batch_size = max(128, int(batch_size or self.settings.bioclip_batch_size or 4096))
 
+        started = time.perf_counter()
         query = query_vector.astype(np.float32, copy=False)
         query = query / max(float(np.linalg.norm(query)), 1e-12)
+        cache_key = self._search_cache_key(query, safe_top_k)
+        cached = self._get_cached_search(cache_key)
+        if cached is not None:
+            cached["latency_ms"] = round((time.perf_counter() - started) * 1000, 3)
+            return cached
+
+        index = self._get_prototype_index()
+        if index is not None:
+            payload = self._search_vector_index(
+                query,
+                top_k=safe_top_k,
+                batch_size=safe_batch_size,
+                index=index,
+                started=started,
+            )
+            self._put_cached_search(cache_key, payload)
+            return payload
+
+        payload = self._search_vector_sqlite(
+            query,
+            top_k=safe_top_k,
+            batch_size=safe_batch_size,
+            started=started,
+        )
+        self._put_cached_search(cache_key, payload)
+        return payload
+
+    def _search_vector_index(
+        self,
+        query: np.ndarray,
+        *,
+        top_k: int,
+        batch_size: int,
+        index: PrototypeIndex,
+        started: float,
+    ) -> dict[str, Any]:
+        heap: list[PrototypeHit] = []
+        total = index.total
+        for start in range(0, total, batch_size):
+            end = min(total, start + batch_size)
+            vectors = index.vectors[start:end]
+            if vectors.dtype != np.float32:
+                vectors = vectors.astype(np.float32)
+            scores = vectors @ query
+            local_count = min(top_k, len(scores))
+            if local_count <= 0:
+                continue
+            indexes = np.argpartition(scores, len(scores) - local_count)[-local_count:]
+            for local_index in indexes:
+                absolute_index = start + int(local_index)
+                hit = PrototypeHit(
+                    similarity=float(scores[local_index]),
+                    queue_taxon_id=index.queue_taxon_ids[absolute_index],
+                    scientific_name=index.scientific_names[absolute_index],
+                    image_count=int(index.image_counts[absolute_index]),
+                )
+                if len(heap) < top_k:
+                    heapq.heappush(heap, hit)
+                elif hit.similarity > heap[0].similarity:
+                    heapq.heapreplace(heap, hit)
+
+        hits = sorted(heap, key=lambda item: item.similarity, reverse=True)
+        return {
+            "hits": hits,
+            "prototype_count": total,
+            "matched_prototype_count": total,
+            "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "search_backend": f"memory-{index.dtype_name}",
+            "index_load_ms": index.load_ms,
+            "cache_hit": False,
+        }
+
+    def _search_vector_sqlite(
+        self,
+        query: np.ndarray,
+        *,
+        top_k: int,
+        batch_size: int,
+        started: float,
+    ) -> dict[str, Any]:
         connection = sqlite3.connect(f"file:{self.database_path.as_posix()}?mode=ro", uri=True, timeout=120)
         connection.row_factory = sqlite3.Row
         heap: list[PrototypeHit] = []
         processed = 0
-        started = time.perf_counter()
         try:
             total = int(
                 connection.execute(
@@ -287,7 +598,7 @@ class CompactBioCLIPClassifier:
                 (BIOCLIP_MODEL_ID, BIOCLIP_EMBEDDING_DIM),
             )
             while True:
-                rows = cursor.fetchmany(safe_batch_size)
+                rows = cursor.fetchmany(batch_size)
                 if not rows:
                     break
                 vectors = np.stack(
@@ -301,7 +612,7 @@ class CompactBioCLIPClassifier:
                 norms = np.linalg.norm(vectors, axis=1, keepdims=True)
                 vectors = vectors / np.maximum(norms, 1e-12)
                 scores = vectors @ query
-                local_count = min(safe_top_k, len(scores))
+                local_count = min(top_k, len(scores))
                 indexes = np.argpartition(scores, len(scores) - local_count)[-local_count:]
                 for index in indexes:
                     hit = PrototypeHit(
@@ -310,7 +621,7 @@ class CompactBioCLIPClassifier:
                         scientific_name=str(rows[index]["scientific_name"] or ""),
                         image_count=int(rows[index]["image_count"] or 0),
                     )
-                    if len(heap) < safe_top_k:
+                    if len(heap) < top_k:
                         heapq.heappush(heap, hit)
                     elif hit.similarity > heap[0].similarity:
                         heapq.heapreplace(heap, hit)
@@ -324,6 +635,9 @@ class CompactBioCLIPClassifier:
             "prototype_count": processed,
             "matched_prototype_count": processed,
             "latency_ms": round((time.perf_counter() - started) * 1000, 3),
+            "search_backend": "sqlite",
+            "index_load_ms": 0.0,
+            "cache_hit": False,
         }
 
     @staticmethod
@@ -402,6 +716,9 @@ class CompactBioCLIPClassifier:
             "bioclip_top_k": candidates,
             "bioclip_is_weak": is_weak,
             "latency_ms": search["latency_ms"],
+            "bioclip_search_backend": search.get("search_backend") or "sqlite",
+            "bioclip_index_load_ms": search.get("index_load_ms") or 0.0,
+            "bioclip_cache_hit": bool(search.get("cache_hit")),
         }
         memory_result = active_learning_memory.query(vector, top_k=5)
         if memory_result:
@@ -471,6 +788,7 @@ class CompactBioCLIPClassifier:
             "enabled": self.enabled,
             "available": self.available,
             "loaded": self._loaded,
+            "model_preload_started": self._model_preload_started,
             "model_id": self.settings.bioclip_model_id,
             "embedding_dim": int(self.settings.bioclip_embedding_dim),
             "device": self._device,
@@ -479,6 +797,15 @@ class CompactBioCLIPClassifier:
             "prototype_db_path": str(self.database_path),
             "prototype_db_exists": self.database_path.is_file(),
             "hf_home_exists": self.hf_home.is_dir(),
+            "search_backend": self._search_backend(),
+            "index_preload_started": self._index_preload_started,
+            "index_loaded": self._index_is_current(self._index),
+            "index_dtype": self._index.dtype_name if self._index else str(self._index_dtype().name),
+            "index_prototype_count": self._index.total if self._index else 0,
+            "index_load_ms": self._index.load_ms if self._index else 0.0,
+            "index_error": self._index_error,
+            "query_cache_size": len(self._search_cache),
+            "query_cache_limit": int(getattr(self.settings, "bioclip_query_cache_size", 0) or 0),
             "offline": {
                 "HF_HOME": os.environ.get("HF_HOME", ""),
                 "HF_HUB_OFFLINE": os.environ.get("HF_HUB_OFFLINE", ""),
