@@ -1,0 +1,137 @@
+[
+  {
+    "id": "wcs-camera-traps",
+    "name": "WCS Camera Traps",
+    "domain": "animal_detection_and_species",
+    "scale": "约140万张图像、约675种标签、约37.5万个框",
+    "homepage": "https://lila.science/datasets/wcscameratraps/",
+    "metadata_url": "https://storage.googleapis.com/public-datasets-lila/wcs/wcs_camera_traps.json.zip",
+    "image_base_url": "https://lilawildlife.blob.core.windows.net/lila-wildlife/wcs-unzipped/",
+    "license": "CDLA-Permissive-1.0",
+    "access": "公开下载",
+    "usage": "主动物检测与相机陷阱物种分类数据；先下载元数据，再按目标物种和相机点位抽样。",
+    "bundled": false
+  },
+  {
+    "id": "inaturalist-2021",
+    "name": "iNaturalist 2021",
+    "domain": "large_scale_animal_plant_species",
+    "scale": "约270万张训练图像、10000个物种；另有约50万张mini训练集",
+    "homepage": "https://www.tensorflow.org/datasets/catalog/i_naturalist2021",
+    "license": "图像许可逐项记录；按官方标注中的license/url字段执行",
+    "access": "官方竞赛/镜像下载",
+    "usage": "大规模动物与植物物种分类主干数据；用脚本按界、物种和最小样本数筛选500～1000类。",
+    "bundled": false
+  },
+  {
+    "id": "swg-camera-traps",
+    "name": "SWG Camera Traps 2018-2020",
+    "domain": "asian_forest_wildlife",
+    "scale": "约204万张图像、120个类别、982个相机点位",
+    "homepage": "https://lila.science/datasets/swg-camera-traps/",
+    "license": "请以数据集页面为准并保存许可快照",
+    "access": "LILA公开数据",
+    "usage": "亚洲森林场景补充；用于麂、野猪、灵猫、猕猴等域适配。",
+    "bundled": false
+  },
+  {
+    "id": "speciesnet",
+    "name": "SpeciesNet",
+    "domain": "camera_trap_species_classifier",
+    "scale": "超过2000个标签，训练数据约6500万张图像",
+    "homepage": "https://github.com/google/cameratrapai",
+    "license": "按官方模型与代码许可证执行",
+    "access": "模型与推理代码公开",
+    "usage": "动物框裁剪后的通用物种分类基线；与MegaDetector组合。",
+    "bundled": false
+  },
+  {
+    "id": "plantnet-300k",
+    "name": "Pl@ntNet-300K",
+    "domain": "plant_species_classification",
+    "scale": "306146张植物图像、1081个物种",
+    "homepage": "https://github.com/plantnet/PlantNet-300K",
+    "doi": "10.5281/zenodo.5645731",
+    "license": "CC BY-SA 4.0",
+    "access": "Zenodo公开下载",
+    "usage": "植物近景分类主数据；根据目标植物学名抽取训练子集。",
+    "bundled": false
+  },
+  {
+    "id": "dfire",
+    "name": "D-Fire",
+    "domain": "fire_and_smoke_detection",
+    "scale": "超过21000张图像；火焰14692个框、烟雾11865个框",
+    "homepage": "https://github.com/gaia-solutions-on-demand/DFireDataset",
+    "license": "请随数据集保留原始许可与引用",
+    "access": "OneDrive/Kaggle公开入口",
+    "usage": "训练火焰和烟雾检测器，包含大量无火无烟负样本。",
+    "bundled": false
+  },
+  {
+    "id": "animal-kingdom",
+    "name": "Animal Kingdom",
+    "domain": "animal_behavior",
+    "scale": "约50小时标注视频、30000段行为视频、850种动物",
+    "homepage": "https://github.com/sutdcv/Animal-Kingdom",
+    "license": "研究用途；通过官方表单申请并遵守条款",
+    "access": "申请下载",
+    "usage": "行走、奔跑、进食、休息、警戒等行为识别增强模块。",
+    "bundled": false
+  },
+  {
+    "id": "amur-tiger-reid",
+    "name": "Amur Tiger Re-identification",
+    "domain": "animal_individual_reid",
+    "scale": "约8000段视频、92只东北虎",
+    "homepage": "https://lila.science/datasets/",
+    "license": "以LILA数据集页面为准",
+    "access": "LILA公开入口",
+    "usage": "东北虎花纹个体重识别实验；结果只能表述为疑似同一个体。",
+    "bundled": false
+  },
+  {
+    "id": "mammalnet",
+    "name": "MammalNet",
+    "domain": "mammal_behavior_video",
+    "scale": "超过18000段视频、约539小时、173类哺乳动物、12类行为",
+    "homepage": "https://mammal-net.github.io/",
+    "license": "研究用途；按官方申请和条款执行",
+    "access": "官方项目页申请",
+    "usage": "补充哺乳动物行为识别与跨物种动作泛化。",
+    "bundled": false
+  },
+  {
+    "id": "weather-image-recognition",
+    "name": "Weather Image Recognition",
+    "domain": "natural_phenomena_classification",
+    "scale": "6862张多天气类型图像",
+    "homepage": "https://www.kaggle.com/datasets/jehanbhathena/weather-dataset",
+    "license": "下载前在Kaggle页面核对并保存当前许可",
+    "access": "Kaggle",
+    "usage": "雾、露、霜、雨、雪、闪电、彩虹等自然现象基础分类。",
+    "bundled": false
+  },
+  {
+    "id": "dawn-adverse-weather",
+    "name": "DAWN (Detection in Adverse Weather Nature)",
+    "domain": "adverse_weather_detection",
+    "scale": "约1000张真实交通环境图像，覆盖雾、雪、雨、沙尘",
+    "homepage": "https://www.kaggle.com/datasets/orvile/dawn-detection-in-adverse-weather-nature",
+    "license": "下载前核对Kaggle数据集许可",
+    "access": "Kaggle",
+    "usage": "作为恶劣天气/自然现象识别的补充测试集，不单独承担大规模训练。",
+    "bundled": false
+  },
+  {
+    "id": "local-reviewed",
+    "name": "WildLens 人工复核回流集",
+    "domain": "domain_adaptation",
+    "scale": "随项目使用持续增长",
+    "homepage": "local://data/processed/reviewed",
+    "license": "由上传者授权；需记录来源与使用范围",
+    "access": "本地",
+    "usage": "用户和监管人员修正后的框、学名、行为与风险标签，用于主动学习。",
+    "bundled": true
+  }
+]

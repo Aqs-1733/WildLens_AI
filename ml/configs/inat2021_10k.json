@@ -1,0 +1,40 @@
+{
+  "dataset": "iNaturalist 2021",
+  "target_species_classes": 10000,
+  "profiles": {
+    "mini": {
+      "train_images": 500000,
+      "images_per_class": 50,
+      "archive": "train_mini.tar.gz",
+      "annotations": "train_mini.json"
+    },
+    "full": {
+      "train_images": 2686843,
+      "archive": "train.tar.gz",
+      "annotations": "train.json"
+    }
+  },
+  "validation_images": 100000,
+  "architecture_default": "mobilenet_v3_small",
+  "hierarchy_heads": ["kingdom", "phylum", "class", "order", "family", "genus", "species"],
+  "loss_weights": {
+    "species": 1.0,
+    "genus": 0.18,
+    "family": 0.12,
+    "order": 0.08,
+    "class": 0.05,
+    "phylum": 0.03,
+    "kingdom": 0.02
+  },
+  "stages": [
+    {"name": "pipeline_smoke", "classes": 100, "samples_per_class": 50, "epochs": 2},
+    {"name": "medium_validation", "classes": 1000, "samples_per_class": 50, "epochs": 5},
+    {"name": "mini_10k_head", "classes": 10000, "samples_per_class": 50, "epochs": 4, "freeze_backbone_epochs": 2},
+    {"name": "mini_10k_finetune", "classes": 10000, "samples_per_class": 50, "epochs": 12, "resume": true}
+  ],
+  "outputs": {
+    "checkpoint_dir": "models/trained/inat10k",
+    "onnx": "models/onnx/wildlife_species.onnx",
+    "taxonomy": "models/metadata/inat2021_taxonomy.json"
+  }
+}

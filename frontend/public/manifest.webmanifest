@@ -1,0 +1,14 @@
+{
+  "name": "识境——动植物与自然现象智能科普",
+  "short_name": "识境",
+  "description": "拍照识别动植物、动物行为和自然现象，边框标注、AI科普、收集册与自然社区。",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#06130f",
+  "theme_color": "#06130f",
+  "orientation": "portrait-primary",
+  "icons": [
+    {"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

@@ -1,0 +1,7 @@
+{
+  "active_species_model": null,
+  "prototype_database": "./storage/species_visual_embeddings.sqlite",
+  "global_species_index": "./models/metadata/global_species_index",
+  "fallback_model": "hf-hub:imageomics/bioclip",
+  "updated_at": null
+}

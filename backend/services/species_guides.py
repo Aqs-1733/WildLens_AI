@@ -1,0 +1,115 @@
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from backend.models import Detection, SpeciesGuideCache, now_utc
+from backend.services.ai import _extract_json, ark_ai
+from backend.services.taxon_names import category_zh, resolve_chinese_name
+
+GUIDE_KEYS = (
+    "summary",
+    "appearance",
+    "habitat",
+    "behavior",
+    "similar_species",
+    "observation_tips",
+    "caution",
+)
+
+
+def _fallback_guide(label: str, scientific_name: str, category: str) -> dict[str, str]:
+    category_name = category_zh(category)
+    display = label or scientific_name or category_name
+    return {
+        "summary": f"{display}是本次识别得到的具体候选，分类为{category_name}。建议结合地点、季节和多角度照片复核。",
+        "appearance": "可重点观察体型、颜色、斑纹、喙/叶/花/果等结构，以及与背景的比例关系。",
+        "habitat": "栖息或生长环境需要结合拍摄地点、季节和周边环境确认。",
+        "behavior": "单张照片只能描述可见姿态，不能把瞬间姿态直接等同于稳定行为。",
+        "similar_species": "相似物种需要比较关键形态、分布区域和多个角度照片。",
+        "observation_tips": "建议补拍正面、侧面、整体与细节照片；动物尽量不靠近、不惊扰。",
+        "caution": "低置信度或局部照片需要人工复核；珍稀物种不要公开精确位置。",
+    }
+
+
+def _clean_guide(value: dict[str, Any], label: str, scientific_name: str, category: str) -> dict[str, str]:
+    fallback = _fallback_guide(label, scientific_name, category)
+    output: dict[str, str] = {}
+    for key in GUIDE_KEYS:
+        text = str(value.get(key) or "").strip()
+        output[key] = text if text else fallback[key]
+    return output
+
+
+async def guide_for_detection(db: Session, detection: Detection) -> dict[str, Any]:
+    scientific_name = str(detection.scientific_name or "").strip()
+    label = resolve_chinese_name(db, scientific_name, detection.label, detection.category)
+    category = str(detection.category or "unknown").lower()
+    cache_key = scientific_name or f"{category}:{label}"
+    cached = db.scalar(select(SpeciesGuideCache).where(SpeciesGuideCache.scientific_name == cache_key))
+    if cached and cached.content and (cached.mode == "ark" or not ark_ai.enabled):
+        content = _clean_guide(dict(cached.content), label, scientific_name, category)
+        return {
+            "detection_id": detection.id,
+            "label": label,
+            "scientific_name": scientific_name,
+            "category": category,
+            "category_zh": category_zh(category),
+            "confidence": detection.confidence,
+            "mode": cached.mode,
+            "common_name_zh": cached.common_name_zh or label,
+            **content,
+        }
+
+    system = (
+        "你是识境的中文自然科普智能体。只输出合法 JSON，不要 Markdown。"
+        "每个字段 1-2 句，中文，准确，不能编造保护级别。"
+    )
+    user = (
+        "为这个识别结果生成简短中文科普。"
+        "JSON字段必须为 summary, appearance, habitat, behavior, similar_species, observation_tips, caution。\n"
+        f"中文名：{label}\n"
+        f"学名：{scientific_name or '未提供'}\n"
+        f"类别：{category_zh(category)}\n"
+        f"置信度：{detection.confidence:.1%}\n"
+        f"模型解释：{(detection.explanation or '无')[:500]}\n"
+        f"候选：{json.dumps(detection.alternatives or [], ensure_ascii=False)[:500]}"
+    )
+    answer = await ark_ai.chat(system, user, temperature=0.15, max_tokens=520, timeout_seconds=60.0)
+    parsed = _extract_json(answer or "") if answer else None
+    if answer and not parsed:
+        parsed = {"summary": answer.strip()[:1200]}
+    mode = "ark" if answer else "local"
+    content = _clean_guide(parsed or {}, label, scientific_name, category)
+
+    if cached:
+        cached.common_name_zh = label
+        cached.category = category
+        cached.content = content
+        cached.mode = mode
+        cached.updated_at = now_utc()
+    else:
+        cached = SpeciesGuideCache(
+            scientific_name=cache_key,
+            common_name_zh=label,
+            category=category,
+            content=content,
+            mode=mode,
+            updated_at=now_utc(),
+        )
+        db.add(cached)
+    db.commit()
+    return {
+        "detection_id": detection.id,
+        "label": label,
+        "scientific_name": scientific_name,
+        "category": category,
+        "category_zh": category_zh(category),
+        "confidence": detection.confidence,
+        "mode": mode,
+        "common_name_zh": label,
+        **content,
+    }

@@ -1,0 +1,18 @@
+{
+  "project": "wildlens_animal_behavior",
+  "task": "video_action_classification",
+  "classes": [
+    "walking", "running", "feeding", "resting", "vigilance", "grooming",
+    "courtship", "parental_care", "fighting", "swimming", "flying", "migration"
+  ],
+  "sources": ["Animal Kingdom", "MammalNet", "人工复核视频片段"],
+  "clip_seconds": 4,
+  "frames_per_clip": 16,
+  "backbone": "videomae_base",
+  "split_group_by": ["source_video", "animal_individual", "location"],
+  "acceptance": {
+    "macro_f1_min": 0.65,
+    "per_class_recall_report": true,
+    "minimum_confidence_for_ui": 0.6
+  }
+}

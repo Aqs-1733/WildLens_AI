@@ -1,0 +1,93 @@
+# ======================
+# Environment
+# ======================
+.env
+.env.*
+!.env.example
+
+.venv/
+venv/
+.venv-speciesnet-cpu/
+
+
+# ======================
+# Python
+# ======================
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+*.egg-info/
+
+
+# ======================
+# Frontend
+# ======================
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+*.tsbuildinfo
+
+
+# ======================
+# Storage
+# ======================
+storage/**
+!storage/**/.gitkeep
+
+
+# ======================
+# Models
+# ======================
+*.pt
+*.pth
+*.onnx
+
+models/checkpoints/
+models/pretrained/
+models/trained/
+models/onnx/
+models/speciesnet_offline/
+
+
+# ======================
+# Dataset
+# ======================
+data/raw/
+data/processed/
+data/yolo_datasets/
+data/acceptance/real_world_v1/
+data/sample_videos/
+
+
+# ======================
+# Tools
+# ======================
+tools/ffmpeg/
+
+
+# ======================
+# Database / Logs
+# ======================
+*.db
+*.sqlite
+*.sqlite3
+*.log
+*.pid
+
+
+# ======================
+# IDE
+# ======================
+.vscode/
+.idea/
+
+
+# ======================
+# OS
+# ======================
+.DS_Store
+Thumbs.db
