@@ -197,6 +197,7 @@ export interface DiscoveryRecord {
 
 export interface SpeciesGuide {
   detection_id: number
+  species_id?: number | null
   label: string
   scientific_name: string
   category: string
@@ -211,4 +212,5 @@ export interface SpeciesGuide {
   similar_species: string
   observation_tips: string
   caution: string
+  localized_alternatives: Array<{ name: string; scientific_name?: string; confidence?: number; common_name_zh?: string; display_name?: string }>
 }

@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from backend.models import Detection, Species
 from backend.services.ai import _extract_json, ark_ai
+from backend.services.taxon_names import has_cjk, resolve_chinese_name
 from backend.services.text_clean import clean_text, is_garbled
 
 LATIN_RE = re.compile(r"^[A-Z][a-z-]+(?:\s+[a-z][a-z-]+){1,3}$")
@@ -108,7 +109,13 @@ def _known_seed(scientific_name: str, category: str, common_hint: str = "") -> d
     if not base:
         base_name = " ".join(scientific_name.split()[:2])
         base = dict(KNOWN_PROFILES.get(base_name, {}))
-    common = base.get("common_name_zh") or clean_text(common_hint) or scientific_name
+    resolved = resolve_chinese_name(None, scientific_name, common_hint, category)
+    common = (
+        base.get("common_name_zh")
+        or (resolved if has_cjk(resolved) else "")
+        or clean_text(common_hint)
+        or scientific_name
+    )
     return {
         "common_name_zh": common,
         "scientific_name": scientific_name,
@@ -238,8 +245,11 @@ async def ensure_species_profile(
         )
 
     common_name = clean_text(profile.get("common_name_zh"), common_hint or scientific_name)
-    if looks_latin(common_name) or is_garbled(common_name):
-        common_name = _known_seed(scientific_name, category, common_hint)["common_name_zh"]
+    preferred_common = _known_seed(scientific_name, category, common_hint)["common_name_zh"]
+    if has_cjk(preferred_common):
+        common_name = preferred_common
+    elif looks_latin(common_name) or is_garbled(common_name):
+        common_name = preferred_common
     profile["common_name_zh"] = _unique_common_name(db, common_name, scientific_name)
     profile["scientific_name"] = scientific_name
     profile["category"] = clean_text(profile.get("category"), category or "unknown")

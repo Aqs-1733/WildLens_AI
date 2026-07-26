@@ -21,6 +21,7 @@ from backend.models import (
     now_utc,
 )
 from backend.services.ai import ark_ai
+from backend.services.species_profile import ensure_species_profile
 from backend.services.taxon_names import localize_prediction
 from backend.vision.ai_correction import correction_hint, merge_ai_correction, needs_ai_correction
 from backend.vision.object_detector import LocalObjectDetector
@@ -720,6 +721,25 @@ async def analyze_photo(
                 continue
 
         species = _find_species(db, common_name, scientific_name)
+        if scientific_name and category in BIOLOGICAL_CATEGORIES:
+            enriched_species = await ensure_species_profile(
+                db,
+                scientific_name=scientific_name,
+                category=category,
+                common_hint=common_name,
+            )
+            if enriched_species:
+                species = enriched_species
+                common_name = enriched_species.common_name
+                scientific_name = enriched_species.scientific_name
+                category = enriched_species.category or category
+                color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"])
+                if not raw.get("explanation") or "BioCLIP" in str(raw.get("explanation")):
+                    raw["explanation"] = (
+                        f"本地 BioCLIP 将图像向量与 400721 个物种视觉原型检索后，"
+                        f"最相近的候选为{common_name}（{scientific_name}）。"
+                        "请结合置信度、Top K 候选和拍摄角度复核。"
+                    )
         detection = Detection(
             job_id=job.id,
             species_id=species.id if species else None,

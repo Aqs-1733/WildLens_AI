@@ -33,6 +33,13 @@ _SCIENTIFIC_ZH: dict[str, str] = {
     "Turdus merula": "乌鸫",
     "Parus major": "大山雀",
     "Hirundo rustica": "家燕",
+    "Hirundo dimidiata": "珍珠胸燕",
+    "Hirundo dimidiata marwitzi": "珍珠胸燕马氏亚种",
+    "Riparia riparia": "崖沙燕",
+    "Tachycineta albilinea": "红树林燕",
+    "Tachycineta bicolor": "树燕",
+    "Progne subis": "紫崖燕",
+    "Cecropis rufula": "赤腰燕",
     "Cardinalis cardinalis": "北美红雀",
     "Sciurus carolinensis": "东部灰松鼠",
     "Odocoileus virginianus": "白尾鹿",
@@ -44,6 +51,16 @@ _SCIENTIFIC_ZH: dict[str, str] = {
     "Panthera tigris tigris": "孟加拉虎",
     "Panthera pardus": "豹",
     "Elephas maximus": "亚洲象",
+}
+
+_ENGLISH_ZH: dict[str, str] = {
+    "mangrove swallow": "红树林燕",
+    "bank swallow": "崖沙燕",
+    "tree swallow": "树燕",
+    "purple martin": "紫崖燕",
+    "european red-rumped swallow": "赤腰燕",
+    "barn swallow": "家燕",
+    "pearl-breasted swallow": "珍珠胸燕",
 }
 
 _SUBSPECIES_ZH: dict[str, str] = {
@@ -153,6 +170,9 @@ def resolve_chinese_name(
     scientific = _clean_scientific(scientific_name)
     if has_cjk(current) and current != "??":
         return current
+    english_name = current.lower()
+    if english_name in _ENGLISH_ZH:
+        return _ENGLISH_ZH[english_name]
     if scientific in _SCIENTIFIC_ZH:
         return _SCIENTIFIC_ZH[scientific]
     target_name = _target_species_names().get(scientific.lower())
@@ -195,7 +215,9 @@ def localize_candidate(db: Session | None, candidate: dict[str, Any]) -> dict[st
     output = dict(candidate)
     scientific = str(output.get("scientific_name") or output.get("name") or "").strip()
     current = str(output.get("common_name") or output.get("name") or "").strip()
-    zh = resolve_chinese_name(db, scientific, current, str(output.get("category") or ""))
+    category = str(output.get("category") or "")
+    scientific_zh = resolve_chinese_name(db, scientific, "", category)
+    zh = scientific_zh if has_cjk(scientific_zh) else resolve_chinese_name(db, scientific, current, category)
     if zh:
         output["common_name_zh"] = zh
         output["display_name"] = zh

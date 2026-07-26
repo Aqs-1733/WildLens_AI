@@ -11,7 +11,6 @@ import {
   Send,
   Share2,
   Sparkles,
-  Volume2,
   X,
 } from 'lucide-react'
 import { api } from '../api/client'
@@ -116,6 +115,8 @@ export default function RecognitionModal({
 
   const title = object.phenomenon || object.behavior || guide?.common_name_zh || guide?.label || object.label
   const scientificName = guide?.scientific_name || object.scientific_name
+  const alternatives: Array<{ name: string; scientific_name?: string; confidence?: number; common_name_zh?: string; display_name?: string }> =
+    guide?.localized_alternatives?.length ? guide.localized_alternatives : object.alternatives
   const typeLabel = useMemo(() => {
     if (object.phenomenon) return '自然现象'
     if (object.behavior) return '动物行为'
@@ -210,17 +211,6 @@ export default function RecognitionModal({
     }
   }
 
-  const speak = () => {
-    if (!('speechSynthesis' in window)) return
-    window.speechSynthesis.cancel()
-    const guideText = guide ? `${guide.summary} ${guide.appearance} ${guide.observation_tips}` : object.explanation
-    const content = `${title}。${scientificName ? `学名${scientificName}。` : ''}${guideText || ''}`
-    const utterance = new SpeechSynthesisUtterance(content)
-    utterance.lang = 'zh-CN'
-    utterance.rate = 0.92
-    window.speechSynthesis.speak(utterance)
-  }
-
   const share = async () => {
     let finalDiscoveryId = savedRecord?.id ?? object.discovery_id
     if (!finalDiscoveryId) {
@@ -280,8 +270,8 @@ export default function RecognitionModal({
               )}
               <article><span>模型解释</span><p>{object.explanation || '暂无详细解释，建议补充更多角度照片。'}</p></article>
               <article><span>可见依据</span><div className="evidence-list">{evidenceItems.map((item, index) => <b key={`${item}-${index}`}><CheckCircle2 />{item}</b>)}</div></article>
-              {object.alternatives.length > 0 && (
-                <article className="recognition-wide"><span>Top 候选与相似物种</span><div className="alternative-list">{object.alternatives.map((item, index) => <div key={`${item.name}-${index}`}><strong>{item.name}</strong><em>{item.scientific_name || '学名待确认'}</em><small>{Math.round((item.confidence ?? 0) * 100)}%</small></div>)}</div></article>
+              {alternatives.length > 0 && (
+                <article className="recognition-wide"><span>Top 候选与相似物种</span><div className="alternative-list">{alternatives.map((item, index) => <div key={`${item.name}-${index}`}><strong>{item.common_name_zh || item.display_name || item.name}</strong><em>{item.scientific_name || '学名待确认'}</em><small>{Math.round((item.confidence ?? 0) * 100)}%</small></div>)}</div></article>
               )}
               <article className="recognition-wide location-save-panel">
                 <span>观察地点</span>
@@ -304,8 +294,15 @@ export default function RecognitionModal({
                   </div>
                 </article>
               )}
+              <article className="recognition-wide inline-ai-question">
+                <span>直接提问</span>
+                <div className="qa-input">
+                  <input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { setTab('ask'); void ask() } }} placeholder={`直接问 AI：${title} 有什么特征、怎么区分、怎么观察？`} />
+                  <button onClick={() => { setTab('ask'); void ask() }}><Send /></button>
+                </div>
+                <p>提问会保存到“自然问答”的历史记录里，之后可以继续查找和接着问。</p>
+              </article>
               <div className="recognition-actions">
-                <button className="ghost-btn" onClick={speak}><Volume2 />朗读中文科普</button>
                 <button className="primary-btn" disabled={saving || Boolean(savedRecord || object.discovery_id)} onClick={() => void saveObservation()}>
                   {savedRecord || object.discovery_id ? <CheckCircle2 /> : <Save />}{savedRecord || object.discovery_id ? '已保存为观察记录' : saving ? '正在保存…' : '确认并保存观察'}
                 </button>

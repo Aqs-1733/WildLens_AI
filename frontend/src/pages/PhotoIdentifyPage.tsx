@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { api, mediaUrl } from '../api/client'
 import RecognitionModal from '../components/RecognitionModal'
 import SpeciesModal from '../components/SpeciesModal'
-import type { PhotoIdentifyResult, PhotoObject } from '../types'
+import type { PhotoIdentifyResult, PhotoObject, SpeciesGuide } from '../types'
 
 const categoryLabels: Record<string, string> = {
   mammal: '哺乳动物', bird: '鸟类', reptile: '爬行动物', amphibian: '两栖动物', fish: '鱼类',
@@ -44,12 +44,50 @@ export default function PhotoIdentifyPage() {
   const [speciesId, setSpeciesId] = useState<number | null>(null)
   const [error, setError] = useState('')
 
+  const storeResult = (next: PhotoIdentifyResult) => {
+    setResult(next)
+    sessionStorage.setItem('shijing_last_photo_result', JSON.stringify(next))
+    setSelected((current) => current ? next.objects.find((item) => item.id === current.id) ?? current : current)
+  }
+
+  const enrichResultWithGuides = async (data: PhotoIdentifyResult): Promise<PhotoIdentifyResult> => {
+    const guideResults = await Promise.allSettled(
+      data.objects.map((object) => api<SpeciesGuide>(`/api/identify/detections/${object.id}/guide`)),
+    )
+    const guides = new Map<number, SpeciesGuide>()
+    guideResults.forEach((item) => {
+      if (item.status === 'fulfilled') guides.set(item.value.detection_id, item.value)
+    })
+    return {
+      ...data,
+      objects: data.objects.map((object) => {
+        const guide = guides.get(object.id)
+        if (!guide) return object
+        const localizedAlternatives = guide.localized_alternatives?.length
+          ? guide.localized_alternatives.map((item) => ({
+              name: item.common_name_zh || item.display_name || item.name,
+              scientific_name: item.scientific_name,
+              confidence: item.confidence,
+            }))
+          : object.alternatives
+        return {
+          ...object,
+          species_id: guide.species_id ?? object.species_id,
+          label: object.phenomenon || object.behavior ? object.label : guide.common_name_zh || guide.label || object.label,
+          explanation: guide.summary || object.explanation,
+          alternatives: localizedAlternatives,
+        }
+      }),
+    }
+  }
+
   useEffect(() => {
     const saved = sessionStorage.getItem('shijing_last_photo_result')
     if (!saved) return
     try {
       const data = JSON.parse(saved) as PhotoIdentifyResult
       setResult(data)
+      void enrichResultWithGuides(data).then(storeResult).catch(() => undefined)
       setPreview(mediaUrl(data.image_url))
     } catch {
       sessionStorage.removeItem('shijing_last_photo_result')
@@ -92,8 +130,8 @@ export default function PhotoIdentifyPage() {
       form.append('hint', hint)
       form.append('address', address)
       const data = await api<PhotoIdentifyResult>('/api/identify/photo', { method: 'POST', body: form })
-      setResult(data)
-      sessionStorage.setItem('shijing_last_photo_result', JSON.stringify(data))
+      const enriched = await enrichResultWithGuides(data)
+      storeResult(enriched)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '识别失败，请稍后重试')
     } finally {
@@ -111,8 +149,8 @@ export default function PhotoIdentifyPage() {
         method: 'POST',
         body: JSON.stringify({ hint, address }),
       })
-      setResult(data)
-      sessionStorage.setItem('shijing_last_photo_result', JSON.stringify(data))
+      const enriched = await enrichResultWithGuides(data)
+      storeResult(enriched)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : '重新识别失败，请稍后重试')
     } finally {

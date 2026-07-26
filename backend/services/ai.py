@@ -41,9 +41,18 @@ def _extract_response_text(data: dict[str, Any]) -> str:
     output = data.get("output")
     if isinstance(output, list):
         chunks: list[str] = []
+        reasoning_chunks: list[str] = []
         for item in output:
             if not isinstance(item, dict):
                 continue
+            summary = item.get("summary")
+            if isinstance(summary, list):
+                for part in summary:
+                    if not isinstance(part, dict):
+                        continue
+                    text = part.get("text") or part.get("summary_text")
+                    if isinstance(text, str) and text.strip():
+                        reasoning_chunks.append(text.strip())
             content = item.get("content")
             if isinstance(content, list):
                 for part in content:
@@ -57,6 +66,8 @@ def _extract_response_text(data: dict[str, Any]) -> str:
                 chunks.append(text.strip())
         if chunks:
             return "\n".join(chunks).strip()
+        if reasoning_chunks:
+            return "\n".join(reasoning_chunks).strip()
     choices = data.get("choices")
     if isinstance(choices, list) and choices:
         message = choices[0].get("message") if isinstance(choices[0], dict) else None
@@ -148,7 +159,10 @@ class ArkAIService:
             "temperature": temperature,
         }
         if max_tokens:
-            payload["max_output_tokens"] = max(128, int(max_tokens))
+            output_tokens = max(128, int(max_tokens))
+            if settings.ark_model.startswith("doubao-seed-2-"):
+                output_tokens = max(4096, output_tokens)
+            payload["max_output_tokens"] = output_tokens
         try:
             async with httpx.AsyncClient(
                 timeout=httpx.Timeout(timeout_seconds, connect=10.0), trust_env=False
@@ -163,7 +177,25 @@ class ArkAIService:
                         json=payload,
                     )
                 response.raise_for_status()
-                return _extract_response_text(response.json())
+                data = response.json()
+                text = _extract_response_text(data)
+                if not text and data.get("status") == "incomplete":
+                    retry_payload = dict(payload)
+                    retry_payload["max_output_tokens"] = max(
+                        8192, int(payload.get("max_output_tokens") or 0)
+                    )
+                    with _temporary_dns_fallback(self.hostname, settings.ark_dns_fallback_ip):
+                        retry = await client.post(
+                            self.url,
+                            headers={
+                                "Authorization": f"Bearer {settings.ark_api_key}",
+                                "Content-Type": "application/json",
+                            },
+                            json=retry_payload,
+                        )
+                    retry.raise_for_status()
+                    text = _extract_response_text(retry.json())
+                return text
         except httpx.HTTPStatusError as exc:
             logger.warning("ARK request failed with status %s", exc.response.status_code)
         except Exception as exc:  # noqa: BLE001

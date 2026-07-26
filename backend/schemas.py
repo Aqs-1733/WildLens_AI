@@ -269,6 +269,7 @@ class ReidentifyRequest(BaseModel):
 
 class SpeciesGuideOut(BaseModel):
     detection_id: int
+    species_id: int | None = None
     label: str
     scientific_name: str
     category: str
@@ -283,6 +284,7 @@ class SpeciesGuideOut(BaseModel):
     similar_species: str
     observation_tips: str
     caution: str = ""
+    localized_alternatives: list = []
 
 
 class ManualObservationRequest(BaseModel):
