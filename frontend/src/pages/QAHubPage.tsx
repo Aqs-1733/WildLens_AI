@@ -9,6 +9,12 @@ type Message = { id: number; role: string; content: string; created_at: string }
 
 const QA_START_NEW_KEY = 'wildlens_qa_start_new'
 const QA_ACTIVE_PREFIX = 'wildlens_qa_active_conversation_'
+const garbledPattern = /[�ÃÂåæçé]{2,}|\?{4,}/
+const cleanTitle = (value: string) => {
+  const title = (value || '').trim()
+  if (!title || garbledPattern.test(title)) return '新的自然问答'
+  return title
+}
 
 export default function QAHubPage() {
   const { user } = useAuth()
@@ -32,7 +38,7 @@ export default function QAHubPage() {
     return items
   }, [])
 
-  useEffect(() => { void api<Species[]>('/api/species').then(setSpecies) }, [])
+  useEffect(() => { void api<Species[]>('/api/species?mine=true').then(setSpecies) }, [])
 
   useEffect(() => {
     if (!user || !activeConversationKey) return
@@ -69,7 +75,7 @@ export default function QAHubPage() {
     void api<Message[]>(`/api/qa/conversations/${conversation}/messages`).then(setMessages)
   }, [conversation])
 
-  const filteredConversations = useMemo(() => conversations.filter((item) => !query || item.title.toLowerCase().includes(query.toLowerCase())), [conversations, query])
+  const filteredConversations = useMemo(() => conversations.filter((item) => !query || cleanTitle(item.title).toLowerCase().includes(query.toLowerCase())), [conversations, query])
 
   const startNew = async () => {
     const item = await api<Conversation>('/api/qa/conversations', { method: 'POST' })
@@ -109,9 +115,9 @@ export default function QAHubPage() {
   }
 
   return <div className="page-stack">
-    <div className="page-intro"><div><span className="eyebrow">NATURE SCIENCE Q&A</span><h2>智能科普与观察问答</h2><p>支持文字和图片附件；聊天记录会自动保存标题，切换页面后可以继续。</p></div><select className="species-select" value={speciesId} onChange={(event) => setSpeciesId(event.target.value)}><option value="">不限定物种，直接问自然问题</option>{species.map((item) => <option key={item.id} value={item.id}>{item.common_name} · {item.scientific_name}</option>)}</select></div>
+    <div className="page-intro"><div><span className="eyebrow">NATURE Q&A</span><h2>自然问答与观察科普</h2><p>支持文字和图片附件；聊天记录会自动保存标题，切换页面后可以继续。</p></div><select className="species-select" value={speciesId} onChange={(event) => setSpeciesId(event.target.value)}><option value="">不限定物种，直接问自然问题</option>{species.map((item) => <option key={item.id} value={item.id}>{item.common_name} · {item.scientific_name}</option>)}</select></div>
     <section className="qa-hub qa-hub-history">
-      <aside className="qa-hub-side"><div className="ai-orb"><Sparkles /></div><h3>识境自然问答</h3><button className="primary-btn full" onClick={() => void startNew()}><MessageCirclePlus/>新建聊天</button><label className="search-box qa-history-search"><Search/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="查找历史记录"/></label><div className="qa-history-list">{filteredConversations.map((item) => <button key={item.id} className={conversation === item.id ? 'active' : ''} onClick={() => setConversation(item.id)}><strong>{item.title}</strong><span>{new Date(item.last_message_at || item.created_at).toLocaleString('zh-CN')}</span></button>)}</div><div className="quick-questions">{['怎样拍摄更利于物种识别？', '为什么动物会迁徙？', '雾和霾怎么区分？'].map((item) => <button key={item} onClick={() => void ask(item)}><Sparkles />{item}</button>)}</div></aside>
+      <aside className="qa-hub-side"><div className="ai-orb"><Sparkles /></div><h3>识境自然问答</h3><button className="primary-btn full" onClick={() => void startNew()}><MessageCirclePlus/>新建聊天</button><label className="search-box qa-history-search"><Search/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="查找历史记录"/></label><div className="qa-history-list">{filteredConversations.map((item) => <button key={item.id} className={conversation === item.id ? 'active' : ''} onClick={() => setConversation(item.id)}><strong>{cleanTitle(item.title)}</strong><span>{new Date(item.last_message_at || item.created_at).toLocaleString('zh-CN')}</span></button>)}</div><div className="quick-questions">{['怎样拍摄更利于物种识别？', '为什么动物会迁徙？', '雾和霾怎么区分？'].map((item) => <button key={item} onClick={() => void ask(item)}><Sparkles />{item}</button>)}</div></aside>
       <div className="qa-hub-main"><div className="qa-hub-messages">{messages.length === 0 && <div className="qa-bubble assistant">你好，我是识境自然科普问答。你可以发文字，也可以附一张图片让我结合自然观察语境解释。</div>}{messages.map((message) => <div className={`qa-bubble ${message.role}`} key={message.id}>{message.content.includes('[图片附件]') ? <MessageWithImage content={message.content}/> : message.content}</div>)}{loading && <div className="qa-bubble assistant typing">正在分析问题、图片附件和可选观察上下文…</div>}</div><div className="qa-attachment-row">{imageUrl && <span>已附图：{imageUrl.split('/').pop()}</span>}<input ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => event.target.files?.[0] && void uploadImage(event.target.files[0])}/><button className="ghost-btn" onClick={() => fileRef.current?.click()}><ImagePlus/>添加图片</button></div><div className="qa-hub-input"><textarea value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); void ask() } }} placeholder="输入任何自然观察或科普问题…" /><button onClick={() => void ask()}><Send /></button></div></div>
     </section>
   </div>

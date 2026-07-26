@@ -174,7 +174,7 @@ def _object_out(db: Session, item: Detection) -> PhotoObjectOut:
         select(DiscoveryRecord.id).where(DiscoveryRecord.detection_id == item.id)
     )
     metadata = _model_metadata(item.evidence or [])
-    label = item.phenomenon or item.behavior or resolve_chinese_name(
+    label = resolve_chinese_name(
         db, item.scientific_name, item.label, item.category
     )
     alternatives = [

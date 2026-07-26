@@ -1,7 +1,7 @@
 import {
   Activity, AlertTriangle, BarChart3, BookOpen, Bot, Camera, CircleUserRound, ClipboardCheck, FileText,
   FlaskConical, History, Home, LogOut, MapPinned, MessageCircle, Microscope, Network, Shield, Settings,
-  Sparkles, Users, X, Menu, FileVideo
+  Sparkles, Users, X, Menu
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { NavLink, Outlet, useLocation } from 'react-router-dom'
@@ -9,21 +9,20 @@ import { useMemo, useState } from 'react'
 import { useAuth } from '../context/AuthContext'
 import Logo from './Logo'
 
-type NavItem = { path: string; icon: LucideIcon; label: string }
+type NavItem = { path: string; icon: LucideIcon; label: string; activePaths?: string[] }
 
 const publicNav: NavItem[] = [
   { path: '/', icon: Home, label: '综合态势' },
-  { path: '/identify', icon: Camera, label: '图片识别' },
-  { path: '/video', icon: FileVideo, label: '视频识别' },
+  { path: '/identify', icon: Camera, label: '识别', activePaths: ['/identify', '/video'] },
   { path: '/jobs', icon: Activity, label: '分析任务' },
-  { path: '/species', icon: BookOpen, label: '物种百科' },
+  { path: '/species', icon: BookOpen, label: '自然图鉴' },
   { path: '/map', icon: MapPinned, label: '生态图谱' },
-  { path: '/qa', icon: MessageCircle, label: '智能科普' },
+  { path: '/qa', icon: MessageCircle, label: '自然问答' },
   { path: '/history', icon: History, label: '观察记录' },
   { path: '/analytics', icon: BarChart3, label: '数据分析' },
   { path: '/learning', icon: Microscope, label: '学习挑战' },
   { path: '/community', icon: Users, label: '林间社群' },
-  { path: '/settings', icon: Settings, label: '系统设置' },
+  { path: '/settings', icon: Settings, label: '个人信息' },
 ]
 const regulatorNav: NavItem[] = [
   { path: '/alerts', icon: AlertTriangle, label: '风险事件' },
@@ -38,7 +37,7 @@ export default function Layout() {
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
   const title = useMemo(() => {
-    const item = [...publicNav, ...regulatorNav].find((entry) => entry.path === location.pathname)
+    const item = [...publicNav, ...regulatorNav].find((entry) => entry.path === location.pathname || entry.activePaths?.includes(location.pathname))
     return item?.label ?? '识境'
   }, [location.pathname])
   const nav = user?.role === 'public' ? publicNav : [...publicNav, ...regulatorNav]
@@ -48,8 +47,8 @@ export default function Layout() {
       <aside className={`sidebar ${mobileOpen ? 'sidebar-open' : ''}`}>
         <div className="sidebar-head"><Logo /><button className="icon-btn mobile-close" onClick={() => setMobileOpen(false)}><X /></button></div>
         <nav className="nav-list">
-          {nav.map(({ path, icon: Icon, label }) => (
-            <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-link ${isActive ? 'active' : ''}`} onClick={() => setMobileOpen(false)}>
+          {nav.map(({ path, icon: Icon, label, activePaths }) => (
+            <NavLink key={path} to={path} end={path === '/'} className={({ isActive }) => `nav-link ${isActive || activePaths?.includes(location.pathname) ? 'active' : ''}`} onClick={() => setMobileOpen(false)}>
               <Icon size={20} /><span>{label}</span>
             </NavLink>
           ))}

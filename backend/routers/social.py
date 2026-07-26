@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import mimetypes
+import uuid
+
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
+from backend.core.config import get_settings
 from backend.core.database import get_db
 from backend.deps import get_current_user
 from backend.models import (
@@ -21,20 +25,23 @@ from backend.models import (
     now_utc,
 )
 from backend.schemas import ChatMessageCreate, ChatThreadCreate, CommentCreate, FriendRequestCreate, PostCreate
+from backend.services.text_clean import clean_text
 
 router = APIRouter(prefix="/api/social", tags=["social"])
+settings = get_settings()
+ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
 
 
 def _user_brief(user: User) -> dict:
     return {
         "id": user.id,
         "username": user.username,
-        "display_name": user.display_name,
+        "display_name": clean_text(user.display_name, f"用户{user.id}"),
         "avatar_url": user.avatar_url or "",
         "level": user.level,
         "stars": user.stars,
         "badges": _badges_for_user(user),
-        "bio": user.bio,
+        "bio": clean_text(user.bio, "热爱自然，也热爱每一次发现。"),
     }
 
 
@@ -47,6 +54,23 @@ def _badges_for_user(user: User) -> list[str]:
     if user.stars >= 50:
         badges.append("星光收藏家")
     return badges
+
+
+@router.post("/attachments")
+async def upload_social_attachment(
+    file: UploadFile = File(...),
+    _: User = Depends(get_current_user),
+) -> dict:
+    content_type = (file.content_type or mimetypes.guess_type(file.filename or "")[0] or "").lower()
+    if content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持 JPG、PNG、WebP 图片")
+    payload = await file.read(10 * 1024 * 1024 + 1)
+    if len(payload) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="图片不能超过 10MB")
+    filename = f"post_{uuid.uuid4().hex}{ALLOWED_IMAGE_TYPES[content_type]}"
+    path = settings.upload_dir / filename
+    path.write_bytes(payload)
+    return {"image_url": f"/media/uploads/{path.name}"}
 
 
 def _notify(db: Session, user_id: int, actor_id: int | None, kind: str, title: str, body: str, payload: dict | None = None) -> None:

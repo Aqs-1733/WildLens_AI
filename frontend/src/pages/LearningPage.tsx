@@ -11,6 +11,7 @@ export default function LearningPage() {
   const [query, setQuery] = useState('')
   const [showAll, setShowAll] = useState(false)
   const [claiming, setClaiming] = useState<number | null>(null)
+  const [claimToast, setClaimToast] = useState('')
 
   const load = () => Promise.all([
     api<Task[]>('/api/species/learning/tasks'),
@@ -22,7 +23,9 @@ export default function LearningPage() {
   const claim = async (id: number) => {
     setClaiming(id)
     try {
-      await api(`/api/species/learning/tasks/${id}/claim`, { method: 'POST' })
+      const result = await api<{ message: string; points: number; stars: number }>(`/api/species/learning/tasks/${id}/claim`, { method: 'POST' })
+      setClaimToast(`${result.message} · 当前 ${result.points} EXP / ${result.stars} 星`)
+      window.setTimeout(() => setClaimToast(''), 2600)
       await load()
     } finally {
       setClaiming(null)
@@ -36,6 +39,7 @@ export default function LearningPage() {
   const earned = badges.filter((item) => item.earned).length
 
   return <div className="page-stack">
+    {claimToast && <div className="claim-toast"><Gift/><strong>{claimToast}</strong><span/><span/><span/></div>}
     <div className="learning-hero">
       <div><span className="eyebrow">LEARN & PROTECT</span><h2>知识越多，星光越亮。</h2><p>挑战进度来自真实观察、分享、视频分析和智能问答；完成后可领取奖励。</p></div>
       <div className="streak-card"><Flame/><strong>{tasks.length}</strong><span>挑战总数</span></div>

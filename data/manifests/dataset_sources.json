@@ -5,7 +5,7 @@
     "domain": "animal_detection_and_species",
     "scale": "约140万张图像、约675种标签、约37.5万个框",
     "homepage": "https://lila.science/datasets/wcscameratraps/",
-    "metadata_url": "https://lilawildlife.blob.core.windows.net/lila-wildlife/wcs_camera_traps.json.zip",
+    "metadata_url": "https://storage.googleapis.com/public-datasets-lila/wcs/wcs_camera_traps.json.zip",
     "image_base_url": "https://lilawildlife.blob.core.windows.net/lila-wildlife/wcs-unzipped/",
     "license": "CDLA-Permissive-1.0",
     "access": "公开下载",

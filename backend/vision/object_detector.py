@@ -28,7 +28,8 @@ class DetectedRegion:
 
 
 _ANIMAL_NAMES = {
-    "animal", "bird", "cat", "dog", "horse", "sheep", "cow", "elephant",
+    "animal", "mammal", "bird", "reptile", "amphibian", "fish", "insect",
+    "arachnid", "cat", "dog", "horse", "sheep", "cow", "elephant",
     "bear", "zebra", "giraffe", "deer", "boar", "monkey", "fox", "wolf",
     "tiger", "leopard", "lion", "rabbit", "squirrel", "snake", "fish",
 }
@@ -46,6 +47,10 @@ _SMOKE_NAMES = {"smoke", "fog"}
 
 def _coarse_category(name: str) -> str:
     normalized = name.strip().lower().replace("_", " ")
+    if normalized in {
+        "mammal", "bird", "reptile", "amphibian", "fish", "insect", "arachnid",
+    }:
+        return normalized
     if normalized in _PERSON_NAMES:
         return "person"
     if normalized in _VEHICLE_NAMES:
@@ -57,7 +62,7 @@ def _coarse_category(name: str) -> str:
     if normalized in _SMOKE_NAMES:
         return "smoke"
     if normalized in _ANIMAL_NAMES:
-        return "bird" if normalized == "bird" else "unknown"
+        return "unknown"
     # MegaDetector commonly uses exactly animal/person/vehicle. Unknown detector
     # labels are intentionally not promoted to a precise species category.
     return "unknown"
@@ -75,6 +80,8 @@ class LocalObjectDetector:
         self.model_path = model_path
         self.confidence = confidence
         self.model: Any | None = None
+        self.ort_session: Any | None = None
+        self.ort_input_name = ""
         self.net: Any | None = None
         self.names: dict[int, str] = {}
         self.input_size = 640
@@ -90,6 +97,19 @@ class LocalObjectDetector:
         if looks_like_path and not path.exists():
             self.error = f"detector weight not found: {path}"
             return
+        if path.exists() and path.suffix.lower() == ".onnx":
+            try:
+                import onnxruntime as ort
+
+                self.ort_session = ort.InferenceSession(
+                    str(path), providers=["CPUExecutionProvider"]
+                )
+                self.ort_input_name = self.ort_session.get_inputs()[0].name
+                self.names = _load_class_names(path)
+                logger.info("Local object detector using ONNX Runtime: %s", path)
+                return
+            except Exception as exc:  # noqa: BLE001
+                self.error = str(exc)
         try:
             from ultralytics import YOLO
 
@@ -111,11 +131,13 @@ class LocalObjectDetector:
 
     @property
     def available(self) -> bool:
-        return self.model is not None or self.net is not None
+        return self.model is not None or self.ort_session is not None or self.net is not None
 
     def detect(self, image_bgr: np.ndarray, max_results: int = 30) -> list[DetectedRegion]:
         if not self.available or image_bgr.size == 0:
             return []
+        if self.ort_session is not None:
+            return self._detect_onnxruntime(image_bgr, max_results=max_results)
         if self.net is not None:
             return self._detect_opencv(image_bgr, max_results=max_results)
         try:
@@ -149,6 +171,55 @@ class LocalObjectDetector:
             logger.warning("Local detector inference failed: %s", exc)
             return []
 
+    def _detect_onnxruntime(
+        self, image_bgr: np.ndarray, max_results: int = 30
+    ) -> list[DetectedRegion]:
+        """Run YOLO26 end-to-end ONNX output: x1, y1, x2, y2, score, class."""
+        height, width = image_bgr.shape[:2]
+        blob = cv2.dnn.blobFromImage(
+            image_bgr,
+            scalefactor=1 / 255.0,
+            size=(self.input_size, self.input_size),
+            mean=(0, 0, 0),
+            swapRB=True,
+            crop=False,
+        )
+        try:
+            raw = self.ort_session.run(None, {self.ort_input_name: blob})[0]
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ONNX Runtime detector inference failed: %s", exc)
+            return []
+        predictions = np.asarray(raw)
+        if predictions.ndim == 3:
+            predictions = predictions[0]
+        if predictions.ndim != 2 or predictions.shape[1] != 6:
+            logger.warning("Unexpected YOLO26 ONNX output shape: %s", predictions.shape)
+            return []
+        output: list[DetectedRegion] = []
+        scale_x, scale_y = width / self.input_size, height / self.input_size
+        for values in predictions:
+            score = float(values[4])
+            if score < self.confidence:
+                continue
+            class_id = int(round(float(values[5])))
+            x1, y1, x2, y2 = [float(value) for value in values[:4]]
+            left = max(0, min(width - 1, int(round(x1 * scale_x))))
+            top = max(0, min(height - 1, int(round(y1 * scale_y))))
+            right = max(left + 1, min(width, int(round(x2 * scale_x))))
+            bottom = max(top + 1, min(height, int(round(y2 * scale_y))))
+            label = self.names.get(class_id, str(class_id))
+            output.append(
+                DetectedRegion(
+                    bbox=(left, top, right - left, bottom - top),
+                    category=_coarse_category(label),
+                    confidence=score,
+                    coarse_label=label,
+                )
+            )
+            if len(output) >= max_results:
+                break
+        return output
+
     def _detect_opencv(self, image_bgr: np.ndarray, max_results: int = 30) -> list[DetectedRegion]:
         height, width = image_bgr.shape[:2]
         blob = cv2.dnn.blobFromImage(
@@ -179,6 +250,27 @@ class LocalObjectDetector:
             if row.size < 5:
                 continue
             values = row.astype(float)
+            # YOLO26 end-to-end ONNX export: x1, y1, x2, y2, confidence, class_id.
+            if row.size == 6 and 0 <= values[4] <= 1 and values[5] >= 0:
+                score = float(values[4])
+                if score < self.confidence:
+                    continue
+                class_id = int(round(values[5]))
+                x1, y1, x2, y2 = values[:4]
+                if max(abs(x1), abs(y1), abs(x2), abs(y2)) <= 1.5:
+                    x1, x2 = x1 * width, x2 * width
+                    y1, y2 = y1 * height, y2 * height
+                else:
+                    x1, x2 = x1 * width / self.input_size, x2 * width / self.input_size
+                    y1, y2 = y1 * height / self.input_size, y2 * height / self.input_size
+                left = max(0, min(width - 1, int(round(x1))))
+                top = max(0, min(height - 1, int(round(y1))))
+                right = max(left + 1, min(width, int(round(x2))))
+                bottom = max(top + 1, min(height, int(round(y2))))
+                boxes.append([left, top, right - left, bottom - top])
+                confidences.append(score)
+                labels.append(self.names.get(class_id, str(class_id)))
+                continue
             obj_conf = 1.0
             class_scores = values[4:]
             if row.size > 6 and values[4] <= 1.0 and values[5:].size:

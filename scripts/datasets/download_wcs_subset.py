@@ -15,7 +15,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-METADATA_URL = "https://storage.googleapis.com/public-datasets-lila/wcs_camera_traps.json.zip"
+METADATA_URL = "https://storage.googleapis.com/public-datasets-lila/wcs/wcs_camera_traps.json.zip"
 IMAGE_BASE_URL = "https://storage.googleapis.com/public-datasets-lila/wcs-unzipped/"
 
 

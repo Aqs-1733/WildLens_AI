@@ -10,6 +10,7 @@ from backend.core.security import create_access_token, hash_password, verify_pas
 from backend.deps import get_current_user
 from backend.models import User, UserPreference, now_utc
 from backend.schemas import LoginRequest, RegisterRequest, TokenResponse, UserOut, UserProfileOut, UserProfileUpdate
+from backend.services.text_clean import clean_text
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 settings = get_settings()
@@ -47,8 +48,15 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> TokenResponse
     return TokenResponse(access_token=create_access_token(str(user.id)))
 
 
+def _clean_user_profile(user: User) -> None:
+    user.display_name = clean_text(user.display_name, f"自然观察者{user.id}")[:80]
+    user.bio = clean_text(user.bio, "热爱自然，也热爱每一次发现。")[:300]
+
+
 @router.get("/me", response_model=UserOut)
-def me(user: User = Depends(get_current_user)) -> User:
+def me(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> User:
+    _clean_user_profile(user)
+    db.commit()
     return user
 
 
@@ -63,7 +71,9 @@ def _preference(db: Session, user: User) -> UserPreference:
 
 @router.get("/profile", response_model=UserProfileOut)
 def profile(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> dict:
+    _clean_user_profile(user)
     pref = _preference(db, user)
+    db.commit()
     return {"user": user, "home_location": pref.home_location, "frequent_locations": pref.frequent_locations or []}
 
 
@@ -74,9 +84,9 @@ def update_profile(
     user: User = Depends(get_current_user),
 ) -> dict:
     if payload.display_name.strip():
-        user.display_name = payload.display_name.strip()
+        user.display_name = clean_text(payload.display_name.strip(), user.display_name)[:80]
     if payload.bio.strip():
-        user.bio = payload.bio.strip()
+        user.bio = clean_text(payload.bio.strip(), user.bio)[:300]
     user.avatar_url = payload.avatar_url.strip() or None
     pref = _preference(db, user)
     pref.home_location = payload.home_location.strip()

@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.core.config import PROJECT_ROOT
@@ -140,7 +140,7 @@ def _subspecies_name(scientific_name: str) -> str:
         return ""
     epithet = parts[2].lower()
     suffix = _SUBSPECIES_ZH.get(epithet)
-    return f"{base_zh}{suffix}" if suffix else f"{base_zh}{parts[2]}亚种"
+    return f"{base_zh}{suffix}" if suffix else f"{base_zh}亚种"
 
 
 def resolve_chinese_name(
@@ -162,21 +162,33 @@ def resolve_chinese_name(
     if subspecies:
         return subspecies
     if db and scientific:
-        species = db.scalar(select(Species).where(Species.scientific_name == scientific))
+        species = db.scalar(
+            select(Species).where(func.lower(Species.scientific_name) == scientific.lower())
+        )
         if species and has_cjk(species.common_name):
             return species.common_name
-        taxon = db.scalar(select(Taxon).where(Taxon.scientific_name == scientific))
+        taxon = db.scalar(
+            select(Taxon).where(func.lower(Taxon.scientific_name) == scientific.lower())
+        )
         if taxon and has_cjk(taxon.common_name_zh):
             return taxon.common_name_zh
         base = _base_species(scientific)
         if base and base != scientific:
-            species = db.scalar(select(Species).where(Species.scientific_name == base))
+            species = db.scalar(
+                select(Species).where(func.lower(Species.scientific_name) == base.lower())
+            )
             if species and has_cjk(species.common_name):
                 return species.common_name
-            taxon = db.scalar(select(Taxon).where(Taxon.scientific_name == base))
+            taxon = db.scalar(
+                select(Taxon).where(func.lower(Taxon.scientific_name) == base.lower())
+            )
             if taxon and has_cjk(taxon.common_name_zh):
                 return taxon.common_name_zh
-    return current or scientific or category_zh(category)
+    if scientific:
+        return scientific
+    if current:
+        return current
+    return category_zh(category)
 
 
 def localize_candidate(db: Session | None, candidate: dict[str, Any]) -> dict[str, Any]:

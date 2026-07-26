@@ -78,10 +78,14 @@ def list_species(
     q: str = "",
     category: str = "",
     protection: str = "",
+    mine: bool = False,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
+    user: User = Depends(get_current_user),
 ) -> list[Species]:
     stmt = select(Species)
+    if mine:
+        collected_ids = select(UserCollection.species_id).where(UserCollection.user_id == user.id)
+        stmt = stmt.where(Species.id.in_(collected_ids))
     if q:
         stmt = stmt.where(
             or_(
@@ -386,7 +390,17 @@ async def get_species(
     if not species:
         raise HTTPException(status_code=404, detail="物种不存在")
     if species.scientific_name and species_needs_profile_refresh(species):
-        _queue_species_profile_refresh(species.id)
+        refreshed = await ensure_species_profile(
+            db,
+            scientific_name=species.scientific_name,
+            category=species.category,
+            common_hint=species.common_name,
+            force=True,
+        )
+        if refreshed:
+            species = refreshed
+            db.commit()
+            db.refresh(species)
     return species
 
 

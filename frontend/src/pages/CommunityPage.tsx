@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Bell, CheckCircle2, Heart, MessageCircle, RefreshCw, Search, Send, Trash2, UserPlus, Users } from 'lucide-react'
-import { api } from '../api/client'
+import { Bell, CheckCircle2, Heart, ImagePlus, MessageCircle, RefreshCw, Search, Send, Trash2, UserPlus, Users, X } from 'lucide-react'
+import { api, mediaUrl } from '../api/client'
 import type { Species } from '../types'
 
 interface Friend { id: number; username: string; display_name: string; avatar_url: string; level: number; stars: number; badges: string[]; bio: string }
@@ -30,6 +30,8 @@ export default function CommunityPage() {
   const [content, setContent] = useState('')
   const [speciesId, setSpeciesId] = useState('')
   const [visibility, setVisibility] = useState('public')
+  const [postImageUrl, setPostImageUrl] = useState('')
+  const [uploadingPostImage, setUploadingPostImage] = useState(false)
   const [refreshSeed, setRefreshSeed] = useState(0)
   const [threads, setThreads] = useState<ChatThread[]>([])
   const [selectedThread, setSelectedThread] = useState<ChatThread | null>(null)
@@ -43,7 +45,7 @@ export default function CommunityPage() {
     api<FeedPost[]>('/api/social/feed'),
     api<FeedPost[]>(`/api/social/feed/recommendations?refresh=${refreshSeed}`),
     api<Notice[]>('/api/social/notifications'),
-    api<Species[]>('/api/species'),
+    api<Species[]>('/api/species?mine=true'),
     api<ChatThread[]>('/api/social/chats'),
   ]).then(([friendData, posts, recs, noticeRows, speciesRows, chatRows]) => {
     setFriends(friendData.friends); setPending(friendData.pending); setFeed(posts); setRecommended(recs); setNotices(noticeRows); setSpecies(speciesRows); setThreads(chatRows)
@@ -67,9 +69,21 @@ export default function CommunityPage() {
 
   const publish = async () => {
     if (!content.trim()) return
-    await api('/api/social/posts', { method: 'POST', body: JSON.stringify({ content, species_id: speciesId ? Number(speciesId) : null, visibility }) })
+    await api('/api/social/posts', { method: 'POST', body: JSON.stringify({ content, image_url: postImageUrl, species_id: speciesId ? Number(speciesId) : null, visibility }) })
     setContent('')
+    setPostImageUrl('')
     await load()
+  }
+  const uploadPostImage = async (file: File) => {
+    setUploadingPostImage(true)
+    try {
+      const form = new FormData()
+      form.append('file', file)
+      const result = await api<{ image_url: string }>('/api/social/attachments', { method: 'POST', body: form })
+      setPostImageUrl(result.image_url)
+    } finally {
+      setUploadingPostImage(false)
+    }
   }
   const requestFriend = async (name = username) => { if (!name.trim()) return; await api('/api/social/friends/request', { method: 'POST', body: JSON.stringify({ username: name.trim() }) }); setUsername(''); await load() }
   const accept = async (id: number) => { await api(`/api/social/friends/${id}/accept`, { method: 'POST' }); await load() }
@@ -97,7 +111,7 @@ export default function CommunityPage() {
     <div className="page-intro"><div><span className="eyebrow">FOREST SOCIAL</span><h2>林间社群</h2><p>真实观察公开交流，好友申请双向提醒，按你观察过的物种和地点推荐相关内容。</p></div><button className="ghost-btn" onClick={() => setRefreshSeed((value) => value + 1)}><RefreshCw/>刷新推荐</button></div>
     <div className="community-layout">
       <main>
-        <section className="panel composer"><div className="composer-title"><Avatar/><div><strong>发布真实观察或自然想法</strong><span>公开内容会进入所有人的社群流；不要把低置信度候选写成确定事实。</span></div></div><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="今天发现了什么？学到了什么？"/><div className="composer-actions"><select value={speciesId} onChange={(event) => setSpeciesId(event.target.value)}><option value="">关联物种（可选）</option>{species.map((item) => <option key={item.id} value={item.id}>{item.common_name} · {item.scientific_name}</option>)}</select><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">公开</option><option value="friends">好友可见</option><option value="private">仅自己</option></select><button className="primary-btn" onClick={() => void publish()}><Send/>发布</button></div></section>
+        <section className="panel composer"><div className="composer-title"><Avatar/><div><strong>发布真实观察或自然想法</strong><span>可发布文字和图片；公开内容会进入所有人的社群流。</span></div></div><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="今天发现了什么？学到了什么？"/>{postImageUrl && <div className="composer-preview"><img src={mediaUrl(postImageUrl)} alt="帖子图片预览"/><button onClick={() => setPostImageUrl('')}><X size={16}/></button></div>}<div className="composer-actions"><select value={speciesId} onChange={(event) => setSpeciesId(event.target.value)}><option value="">关联物种（可选）</option>{species.map((item) => <option key={item.id} value={item.id}>{item.common_name} · {item.scientific_name}</option>)}</select><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">公开</option><option value="friends">好友可见</option><option value="private">仅自己</option></select><label className="ghost-btn upload-label"><ImagePlus/>{uploadingPostImage ? '上传中' : '添加图片'}<input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => event.target.files?.[0] && void uploadPostImage(event.target.files[0])}/></label><button className="primary-btn" onClick={() => void publish()}><Send/>发布</button></div></section>
         <section className="panel"><div className="panel-head"><div><span className="eyebrow">RECOMMENDED</span><h3>为你推荐 10 条真实动态</h3></div><RefreshCw onClick={() => setRefreshSeed((value) => value + 1)}/></div><div className="feed-list compact-feed">{recommended.map((post) => <FeedCard key={post.id} post={post} onLike={like}/>)}</div></section>
         <section className="panel"><div className="history-toolbar"><label className="search-box"><Search/><input value={postQuery} onChange={(event) => setPostQuery(event.target.value)} placeholder="搜索所有可见动态"/></label></div><div className="feed-list">{filteredFeed.map((post) => <FeedCard key={post.id} post={post} onLike={like}/>)}</div></section>
       </main>
@@ -148,6 +162,7 @@ function FeedCard({ post, onLike }: { post: FeedPost; onLike: (id: number) => Pr
     {post.species && <div className="post-species" style={{ borderColor: post.species.color }}><span style={{ background: post.species.color }}/>{post.species.common_name}<em>{post.species.scientific_name}</em></div>}
     {post.discovery && <div className="post-species" style={{ borderColor: '#38f2ad' }}><span style={{ background: '#38f2ad' }}/>{post.discovery.title}</div>}
     <p>{post.content}</p>
+    {post.image_url && <img className="feed-image" src={mediaUrl(post.image_url)} alt="动态图片"/>}
     <div className="feed-actions">
       <button className={post.liked_by_me ? 'liked' : ''} onClick={() => void onLike(post.id)}><Heart fill={post.liked_by_me ? 'currentColor' : 'none'}/> {post.likes}</button>
       <button onClick={() => void toggleComments()}><MessageCircle/> {commentsOpen ? '收起评论' : `评论 ${Math.max(post.comment_count, comments.length)}`}</button>

@@ -13,6 +13,25 @@ const categoryLabels: Record<string, string> = {
   fungus: '真菌', lichen: '地衣', phenomenon: '自然现象', weather: '天气现象', fire: '火焰候选', smoke: '烟雾候选', unknown: '待确认',
 }
 
+const displayBBox = (bbox: PhotoObject['bbox']) => {
+  const insetX = bbox.width * 0.035
+  const insetY = bbox.height * 0.035
+  return {
+    x: Math.min(1, Math.max(0, bbox.x + insetX)),
+    y: Math.min(1, Math.max(0, bbox.y + insetY)),
+    width: Math.max(0.02, bbox.width - insetX * 2),
+    height: Math.max(0.02, bbox.height - insetY * 2),
+  }
+}
+
+const displaySpeciesName = (object: PhotoObject) => {
+  if (/[\u3400-\u9fff]/.test(object.label)) return object.label
+  if (object.scientific_name?.trim()) return object.scientific_name.trim()
+  if (object.label?.trim()) return object.label.trim()
+  const category = categoryLabels[object.category]
+  return category ? `待确认${category}` : '待确认目标'
+}
+
 export default function PhotoIdentifyPage() {
   const inputRef = useRef<HTMLInputElement>(null)
   const [file, setFile] = useState<File | null>(null)
@@ -135,20 +154,23 @@ export default function PhotoIdentifyPage() {
           ) : (
             <div className="photo-canvas">
               <img src={imageSource} alt="待识别自然照片" />
-              {result?.objects.map((object) => (
-                <button
-                  key={object.id}
-                  className="photo-box"
-                  style={{
-                    left: `${object.bbox.x * 100}%`, top: `${object.bbox.y * 100}%`,
-                    width: `${object.bbox.width * 100}%`, height: `${object.bbox.height * 100}%`,
-                    borderColor: object.color, '--box-tone': object.color,
-                  } as React.CSSProperties}
-                  onClick={() => setSelected(object)}
-                >
-                  <span style={{ background: object.color }}>{object.label} · {Math.round(object.confidence * 100)}%</span>
-                </button>
-              ))}
+              {result?.objects.map((object) => {
+                const box = displayBBox(object.bbox)
+                return (
+                  <button
+                    key={object.id}
+                    className="photo-box"
+                    style={{
+                      left: `${box.x * 100}%`, top: `${box.y * 100}%`,
+                      width: `${box.width * 100}%`, height: `${box.height * 100}%`,
+                      borderColor: object.color, '--box-tone': object.color,
+                    } as React.CSSProperties}
+                    onClick={() => setSelected(object)}
+                  >
+                    <span style={{ background: object.color }}>{displaySpeciesName(object)} · {Math.round(object.confidence * 100)}%</span>
+                  </button>
+                )
+              })}
               {loading && <div className="photo-scanning"><div className="scan-line" /><Loader2 className="spin" /><strong>正在分析形态、纹理、场景与行为…</strong></div>}
             </div>
           )}
@@ -192,7 +214,7 @@ export default function PhotoIdentifyPage() {
             {result.objects.map((object) => (
               <button key={object.id} className="identified-card" onClick={() => setSelected(object)}>
                 <div className="identified-icon" style={{ color: object.color, background: `${object.color}18` }}><ScanLine /></div>
-                <div><span>{categoryLabels[object.category] || object.category}</span><h3>{object.phenomenon || object.behavior || object.label}</h3><em>{object.scientific_name || '学名待确认'}</em><p>{object.explanation || '点击查看识别解释和中文科普。'}</p></div>
+                <div><span>{categoryLabels[object.category] || object.category}</span><h3>{displaySpeciesName(object)}</h3><em>{object.scientific_name || '学名待确认'}</em><p>{object.explanation || '点击查看识别解释和中文科普。'}</p></div>
                 <strong>{Math.round(object.confidence * 100)}%</strong>
               </button>
             ))}

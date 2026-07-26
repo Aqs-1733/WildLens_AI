@@ -7,10 +7,12 @@ from pathlib import Path
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("data", type=Path)
-    parser.add_argument("--base", default="yolo11n.pt")
+    parser.add_argument("--base", default="yolo26s.pt")
     parser.add_argument("--epochs", type=int, default=60)
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--batch", type=int, default=16)
+    parser.add_argument("--device", default="0")
+    parser.add_argument("--workers", type=int, default=0)
     parser.add_argument("--project", default="models/trained/runs")
     parser.add_argument("--name", default="wildlife_detector")
     args = parser.parse_args()
@@ -22,6 +24,7 @@ def main() -> int:
     result = model.train(
         data=str(args.data), epochs=args.epochs, imgsz=args.imgsz, batch=args.batch,
         project=args.project, name=args.name, patience=12, cache=False, pretrained=True,
+        device=args.device, workers=args.workers,
     )
     print(result)
     return 0

@@ -81,7 +81,7 @@ export default function NatureMapPage() {
           name: item.title,
           value: [Number(item.longitude), Number(item.latitude), item.count],
           item,
-          symbolSize: Math.min(20, 8 + Math.log2(item.count + 1) * 3.5),
+          symbolSize: Math.min(14, 5 + Math.log2(item.count + 1) * 2.4),
           itemStyle: { color: item.is_first ? '#ffe278' : meta.color, borderColor: '#06130f', borderWidth: 2 },
         }))
         chart.setOption({
@@ -110,7 +110,7 @@ export default function NatureMapPage() {
             type: 'effectScatter',
             coordinateSystem: 'geo',
             data,
-            rippleEffect: { scale: 2.8, brushType: 'stroke' },
+            rippleEffect: { scale: 2.1, brushType: 'stroke' },
             showEffectOn: 'emphasis',
           }],
         }, true)

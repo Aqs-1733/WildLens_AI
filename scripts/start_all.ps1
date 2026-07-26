@@ -1,6 +1,10 @@
-$ErrorActionPreference = "Stop"
+﻿$ErrorActionPreference = "Stop"
 
 $Root = Resolve-Path (Join-Path $PSScriptRoot "..")
+$ProjectFfmpegBin = Join-Path $Root "tools\ffmpeg\bin"
+if (Test-Path (Join-Path $ProjectFfmpegBin "ffmpeg.exe")) {
+  $env:Path = "$ProjectFfmpegBin;$env:Path"
+}
 $LogDir = Join-Path $Root "storage\logs"
 $PidDir = Join-Path $Root "storage\pids"
 New-Item -ItemType Directory -Force -Path $LogDir, $PidDir, (Join-Path $Root "storage\uploads"), (Join-Path $Root "storage\results"), (Join-Path $Root "storage\reports"), (Join-Path $Root "storage\annotated"), (Join-Path $Root "storage\playback"), (Join-Path $Root "storage\outputs"), (Join-Path $Root "models\registry"), (Join-Path $Root "models\checkpoints") | Out-Null
@@ -35,7 +39,7 @@ Push-Location $Root
 try {
   Test-Tool "uv"
   Test-Tool "node"
-  Test-Tool "pnpm"
+  Test-Tool "npm"
   Test-Tool "ffmpeg"
   Test-Tool "ffprobe"
 
@@ -43,10 +47,10 @@ try {
   uv run python scripts/migrate_db.py
 
   $uv = (Get-Command uv).Source
-  $pnpm = (Get-Command pnpm).Source
+  $npm = (Get-Command npm).Source
   Start-Managed "backend" $uv @("run", "python", "backend/main.py") $Root
   Start-Managed "worker" $uv @("run", "python", "scripts/worker.py") $Root
-  Start-Managed "frontend" "cmd.exe" @("/c", "pnpm", "dev") (Join-Path $Root "frontend")
+  Start-Managed "frontend" "cmd.exe" @("/c", "npm", "run", "dev") (Join-Path $Root "frontend")
 
   Write-Host ""
   Write-Host "识境 is starting."
@@ -57,3 +61,4 @@ try {
 } finally {
   Pop-Location
 }
+
