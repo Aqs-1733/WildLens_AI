@@ -79,12 +79,17 @@ def _local(scientific: str, confidence: float = 0.8, family: str = "felidae") ->
 
 
 def _bioclip(
-    scientific: str, confidence: float = 0.91, similarity: float = 0.9, margin: float = 0.12
+    scientific: str,
+    confidence: float = 0.91,
+    similarity: float = 0.9,
+    margin: float = 0.12,
+    weak: bool | None = None,
+    active_learning: bool = False,
 ) -> dict:
     parts = scientific.split()
     genus = parts[0].lower()
     species = parts[1].lower() if len(parts) > 1 else ""
-    return {
+    result = {
         "common_name": scientific,
         "scientific_name": scientific,
         "category": "mammal",
@@ -103,8 +108,19 @@ def _bioclip(
                 "prototype_image_count": 42,
             }
         ],
-        "bioclip_is_weak": similarity < 0.55,
+        "bioclip_is_weak": similarity < 0.55 if weak is None else weak,
     }
+    if active_learning:
+        result["active_learning_applied"] = True
+        result["active_learning_evidence"] = {
+            "active_learning_accepted": True,
+            "active_learning_similarity": 1.0,
+            "active_learning_margin": 0.35,
+            "active_learning_support": 3,
+            "active_learning_sources": ["showcase-reference"],
+            "active_learning_row_ids": [1, 2, 3],
+        }
+    return result
 
 
 def _blank_detector_result(score: float = 0.99) -> dict:
@@ -221,7 +237,7 @@ def test_fusion_low_confidence_unknown():
         existing_result={"common_name": "candidate", "category": "mammal", "confidence": 0.3},
     )
     assert fusion["decision"] == "unknown"
-    assert fusion["result"]["common_name"] == "待确认动物"
+    assert fusion["result"]["common_name"] == "低置信度动物候选"
     assert fusion["result"]["scientific_name"] == ""
 
 
@@ -231,8 +247,25 @@ def test_weak_bioclip_unknown_does_not_surface_specific_species():
         existing_result=_bioclip("Clariallabes longicauda", confidence=0.43, similarity=0.4),
     )
     assert fusion["decision"] == "unknown"
-    assert fusion["result"]["common_name"] == "待确认动物"
+    assert fusion["result"]["common_name"] == "低置信度动物候选"
     assert fusion["result"]["scientific_name"] == ""
+
+
+def test_active_learning_memory_can_rescue_weak_bioclip_margin_without_speciesnet():
+    fusion = fuse_species_results(
+        speciesnet_result=None,
+        existing_result=_bioclip(
+            "Ginkgo biloba",
+            confidence=0.875,
+            similarity=0.71,
+            margin=0.01,
+            weak=True,
+            active_learning=True,
+        ),
+    )
+    assert fusion["decision"] == "bioclip_only"
+    assert fusion["result"]["scientific_name"] == "Ginkgo biloba"
+    assert fusion["result"]["active_learning_evidence"]["accepted"] is True
 
 
 def test_speciesnet_blank_with_animal_detection_stays_unresolved_animal():
@@ -241,9 +274,25 @@ def test_speciesnet_blank_with_animal_detection_stays_unresolved_animal():
         existing_result=_bioclip("Clariallabes longicauda", confidence=0.43, similarity=0.56),
     )
     assert fusion["decision"] == "speciesnet_only"
-    assert fusion["result"]["common_name"] == "待确认动物"
+    assert fusion["result"]["common_name"] == "低置信度动物候选"
     assert fusion["result"]["scientific_name"] == ""
     assert fusion["result"]["confidence"] == 0.77
+
+
+def test_speciesnet_object_detector_does_not_hide_strong_bioclip_species_candidate():
+    fusion = fuse_species_results(
+        speciesnet_result=_blank_detector_result(score=0.97),
+        existing_result=_bioclip(
+            "Nycticorax nycticorax",
+            confidence=0.766,
+            similarity=0.876,
+            margin=0.005,
+            weak=True,
+        ),
+    )
+    assert fusion["decision"] == "review"
+    assert fusion["result"]["scientific_name"] == "Nycticorax nycticorax"
+    assert "speciesnet-detector" in fusion["result"]["model_source"]
 
 
 def test_old_photo_response_fields_remain_valid():

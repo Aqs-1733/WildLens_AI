@@ -218,11 +218,12 @@ class ArkAIService:
         safe_mime = mime_type if mime_type in {"image/jpeg", "image/png", "image/webp"} else "image/jpeg"
         data_url = f"data:{safe_mime};base64," + base64.b64encode(image_bytes).decode("ascii")
         prompt = (
-            "你是自然观察图像识别助手。识别图片里所有清晰可见的动物、植物、真菌、昆虫、自然现象与动物行为。"
+            "你是自然观察图像识别助手。识别图片里所有清晰可见的动物、植物、真菌、昆虫和独立自然现象；"
+            "如果目标是动物，同时判断它正在进行的行为。"
             "只输出合法JSON，不要Markdown，不要解释JSON之外的文字。"
             "JSON结构必须为："
             '{"scene_summary":"一句话场景概述","scene_type":"forest/wetland/urban/sky/coast/mountain/other",'
-            '"objects":[{"common_name":"中文名或待确认目标","scientific_name":"可靠时填写拉丁学名，否则空字符串",'
+            '"objects":[{"common_name":"中文名或低置信度候选","scientific_name":"可靠时填写拉丁学名，否则空字符串",'
             '"english_name":"英文名或空字符串","category":"mammal/bird/reptile/amphibian/fish/insect/arachnid/mollusk/crustacean/invertebrate/angiosperm/gymnosperm/fern/moss/algae/fungus/lichen/phenomenon/weather/fire/smoke/unknown",'
             '"confidence":0.0,"bbox":{"x":0.0,"y":0.0,"width":1.0,"height":1.0},'
             '"behavior":"动物行为，无则空字符串","phenomenon":"自然现象，无则空字符串",'
@@ -231,7 +232,7 @@ class ArkAIService:
             '"warnings":["低置信度或需要人工确认的说明"]}。'
             "bbox为相对整图的归一化矩形，x/y是左上角，范围0到1。最多返回8个最重要目标。"
             "若同一植物只构成背景且无法确定具体种类，不要滥标；若自然现象如雾、彩虹、积雨云覆盖全图，可用全图框。"
-            "alternatives最多返回5个形态相近候选。不得编造确定学名；置信度低于0.55时标签用疑似或待确认。"
+            "alternatives最多返回5个形态相近候选。不得编造确定学名；置信度低于0.55时标签用疑似或低置信度候选。"
             f"用户场景提示：{hint or '用户拍摄的自然观察照片'}"
         )
         payload = {

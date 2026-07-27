@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session
 
 from backend.models import Detection, Species
 from backend.services.ai import _extract_json, ark_ai
-from backend.services.taxon_names import has_cjk, resolve_chinese_name
+from backend.services.taxon_names import (
+    category_zh,
+    has_cjk,
+    normalize_category,
+    resolve_chinese_name,
+)
 from backend.services.text_clean import clean_text, is_garbled
 
 LATIN_RE = re.compile(r"^[A-Z][a-z-]+(?:\s+[a-z][a-z-]+){1,3}$")
@@ -32,6 +37,10 @@ CATEGORY_COLORS = {
     "algae": "#35E58C",
     "fungus": "#E0B55A",
     "lichen": "#B4D66C",
+    "phenomenon": "#65D6FF",
+    "weather": "#65D6FF",
+    "fire": "#FF354D",
+    "smoke": "#FF824D",
     "unknown": "#8CA9A0",
 }
 
@@ -42,14 +51,14 @@ KNOWN_PROFILES: dict[str, dict[str, Any]] = {
         "category": "mammal",
         "rarity": 5,
         "protection_level": "国家一级保护动物",
-        "traits": "体型巨大，冬季毛色较浅，黑色横纹稀疏，头圆耳短，四肢粗壮有力。",
+        "traits": "体型巨大，冬季毛色较浅，黑色横纹较疏，头圆耳短，四肢粗壮有力。",
         "habitat": "主要栖息在针阔混交林、山地森林和河谷林地，依赖连续森林和充足猎物。",
         "distribution": "中国东北、俄罗斯远东及朝鲜半岛北部有分布，中国野外种群主要在东北虎豹国家公园一带。",
         "diet": "以鹿、野猪等中大型有蹄类为主，也会捕食小型哺乳动物。",
-        "activity": "多在晨昏和夜间活动，单独生活，领域范围很大。",
+        "activity": "多在晨昏和夜间活动，通常独居，领域范围很大。",
         "ecology_value": "作为顶级捕食者调节有蹄类数量，维持森林食物网稳定。",
         "threats": "栖息地破碎化、猎物减少和人兽冲突是主要威胁。",
-        "conservation": "保护连续森林廊道，减少盗猎和干扰，野外观察不要公开精确位置。",
+        "conservation": "保护连续森林廊道，减少盗猎和干扰；野外观察不要公开精确位置。",
         "facts": ["虎纹如同指纹，可辅助个体识别。", "冬季毛发更厚，能适应严寒环境。"],
     },
     "Panthera tigris tigris": {
@@ -68,9 +77,17 @@ KNOWN_PROFILES: dict[str, dict[str, Any]] = {
         "conservation": "保护栖息地和迁移廊道，减少人虎冲突；不要追逐、投喂或公开精确位置。",
         "facts": ["孙德尔本斯红树林中也有孟加拉虎活动。", "条纹帮助它在草丛和林下阴影中隐蔽。"],
     },
-    "Panthera tigris": {"common_name_zh": "虎", "english_name": "Tiger", "category": "mammal", "rarity": 5, "protection_level": "国家一级保护动物"},
+    "Panthera tigris": {"common_name_zh": "虎", "english_name": "Tiger", "category": "mammal", "rarity": 5, "protection_level": "重点保护大型猫科动物"},
     "Panthera pardus": {"common_name_zh": "金钱豹", "english_name": "Leopard", "category": "mammal", "rarity": 5, "protection_level": "国家一级保护动物"},
+    "Panthera leo": {"common_name_zh": "狮", "english_name": "Lion", "category": "mammal", "rarity": 5, "protection_level": "需结合当地名录确认"},
+    "Ailuropoda melanoleuca": {"common_name_zh": "大熊猫", "english_name": "Giant panda", "category": "mammal", "rarity": 5, "protection_level": "国家一级保护动物"},
     "Elephas maximus": {"common_name_zh": "亚洲象", "english_name": "Asian elephant", "category": "mammal", "rarity": 5, "protection_level": "国家一级保护动物"},
+    "Elephas maximus indicus": {"common_name_zh": "印度象", "english_name": "Indian elephant", "category": "mammal", "rarity": 5, "protection_level": "亚洲象亚种，保护级别需结合当地名录确认"},
+    "Giraffa camelopardalis": {"common_name_zh": "长颈鹿", "english_name": "Giraffe", "category": "mammal", "rarity": 4, "protection_level": "易危物种，需结合当地名录确认"},
+    "Giraffa camelopardalis camelopardalis": {"common_name_zh": "努比亚长颈鹿", "english_name": "Nubian giraffe", "category": "mammal", "rarity": 5, "protection_level": "极危亚种，需结合当地名录确认"},
+    "Vulpes vulpes": {"common_name_zh": "赤狐", "english_name": "Red fox", "category": "mammal", "rarity": 2, "protection_level": "常见野生动物，需结合当地名录确认"},
+    "Haliaeetus leucocephalus": {"common_name_zh": "白头海雕", "english_name": "Bald eagle", "category": "bird", "rarity": 4, "protection_level": "需结合当地名录确认"},
+    "Haliaeetus leucocephalus washingtoniensis": {"common_name_zh": "白头海雕北方亚种", "english_name": "Northern bald eagle", "category": "bird", "rarity": 4, "protection_level": "需结合当地名录确认"},
     "Passer montanus": {"common_name_zh": "树麻雀", "english_name": "Eurasian tree sparrow", "category": "bird", "rarity": 1, "protection_level": "常见鸟类"},
     "Passer montanus kansuensis": {"common_name_zh": "树麻雀甘肃亚种", "english_name": "Eurasian tree sparrow", "category": "bird", "rarity": 2, "protection_level": "常见鸟类"},
     "Nycticorax nycticorax": {
@@ -90,8 +107,25 @@ KNOWN_PROFILES: dict[str, dict[str, Any]] = {
         "facts": ["夜鹭的英文名来自其偏夜行的习性。", "幼鸟外观与成鸟差异很大，容易被误认。"],
     },
     "Nycticorax nycticorax nycticorax": {"common_name_zh": "夜鹭指名亚种", "english_name": "Black-crowned night heron", "category": "bird", "rarity": 2, "protection_level": "未列入本地重点保护名录"},
-    "Ginkgo biloba": {"common_name_zh": "银杏", "english_name": "Ginkgo", "category": "plant", "rarity": 4, "protection_level": "国家一级重点保护野生植物"},
+    "Ginkgo biloba": {
+        "common_name_zh": "银杏",
+        "english_name": "Ginkgo",
+        "category": "plant",
+        "rarity": 4,
+        "protection_level": "国家一级重点保护野生植物",
+        "traits": "叶片扇形，叶脉二叉分叉，秋季常变为鲜黄色，是现存银杏纲中唯一物种。",
+        "habitat": "常作为行道树和园林树栽培，野生或半野生种群多见于温暖湿润山区。",
+        "distribution": "原产中国，现广泛栽培于世界多地。",
+        "diet": "植物通过光合作用获取能量，不属于动物食性。",
+        "activity": "落叶乔木，春季展叶，秋季叶色转黄后落叶。",
+        "ecology_value": "耐污染、寿命长，具有重要科研、园林和文化价值。",
+        "threats": "野生种群较少，遗传多样性和原生栖息地保护值得关注。",
+        "conservation": "不要采挖野生植株，记录地点时注意区分栽培个体和野生个体。",
+        "facts": ["银杏常被称为活化石。", "雌株成熟种子有特殊气味。"],
+    },
 }
+
+_PROFILE_FIELDS = ("traits", "habitat", "distribution", "diet", "activity", "ecology_value", "threats", "conservation")
 
 
 def looks_latin(value: str) -> bool:
@@ -105,6 +139,7 @@ def is_specific_species_name(value: str) -> bool:
 
 
 def _known_seed(scientific_name: str, category: str, common_hint: str = "") -> dict[str, Any]:
+    category = normalize_category(category)
     base = dict(KNOWN_PROFILES.get(scientific_name, {}))
     if not base:
         base_name = " ".join(scientific_name.split()[:2])
@@ -120,18 +155,18 @@ def _known_seed(scientific_name: str, category: str, common_hint: str = "") -> d
         "common_name_zh": common,
         "scientific_name": scientific_name,
         "english_name": base.get("english_name", ""),
-        "category": base.get("category", category or "unknown"),
+        "category": normalize_category(base.get("category", category)),
         "protection_level": base.get("protection_level", "未列入本地重点保护名录"),
         "rarity": int(base.get("rarity", 2)),
-        "traits": "",
-        "habitat": "",
-        "distribution": "",
-        "diet": "",
-        "activity": "",
-        "ecology_value": "",
-        "threats": "",
-        "conservation": "",
-        "facts": [],
+        "traits": base.get("traits", ""),
+        "habitat": base.get("habitat", ""),
+        "distribution": base.get("distribution", ""),
+        "diet": base.get("diet", ""),
+        "activity": base.get("activity", ""),
+        "ecology_value": base.get("ecology_value", ""),
+        "threats": base.get("threats", ""),
+        "conservation": base.get("conservation", ""),
+        "facts": list(base.get("facts", [])),
     }
 
 
@@ -142,24 +177,33 @@ async def _ai_profile(scientific_name: str, category: str, common_hint: str = ""
         "请根据公开自然史资料、常见权威名录和稳定物种知识，生成中文物种档案。"
         "必须输出严格 JSON，不要 Markdown，不要 JSON 之外文字。"
         "中文名必须具体，不要写“某种鸟”“待确认”“疑似”。"
-        "如果是亚种或变种，中文名要体现亚种/变种。"
-        "不要编造保护级别；不确定时写“未列入本地重点保护名录”或说明需以当地名录为准。"
+        "如果是亚种或变种，中文名要体现亚种/变种；不确定保护级别时写“需结合当地名录确认”。"
         "字段：common_name_zh, scientific_name, english_name, category, protection_level, rarity,"
         "traits, habitat, distribution, diet, activity, ecology_value, threats, conservation, facts。"
+        "category 必须是 mammal/bird/reptile/amphibian/fish/insect/arachnid/mollusk/crustacean/"
+        "invertebrate/plant/angiosperm/gymnosperm/fern/moss/algae/fungus/lichen/phenomenon/weather/fire/smoke/unknown 之一。"
         "rarity 为 1-5；facts 为 2-4 条中文短句。"
         f"\n学名：{scientific_name}\n当前类别：{category or 'unknown'}\n名称线索：{common_hint or '无'}"
     )
-    answer = await ark_ai.chat("你是中文物种百科编辑，只输出 JSON。", prompt, temperature=0.05, max_tokens=900, timeout_seconds=60.0)
+    answer = await ark_ai.chat("你是中文物种百科编辑，只输出 JSON。", prompt, temperature=0.05, max_tokens=1000, timeout_seconds=60.0)
     if not answer:
         return None
     data = _extract_json(answer)
     return data if isinstance(data, dict) else None
 
 
-def _unique_common_name(db: Session, common_name: str, scientific_name: str) -> str:
+def _unique_common_name(
+    db: Session,
+    common_name: str,
+    scientific_name: str,
+    *,
+    current_species_id: int | None = None,
+) -> str:
     common_name = clean_text(common_name, scientific_name)[:90] or scientific_name[:90]
+    if not common_name:
+        return scientific_name[:100]
     existing = db.scalar(select(Species).where(Species.common_name == common_name))
-    if not existing or existing.scientific_name == scientific_name:
+    if not existing or existing.id == current_species_id or existing.scientific_name == scientific_name:
         return common_name
     suffix = scientific_name[: max(1, 96 - len(common_name))]
     return f"{common_name}（{suffix}）"[:100]
@@ -171,8 +215,15 @@ def species_needs_profile_refresh(species: Species) -> bool:
         return False
     fields = " ".join(str(getattr(species, field, "") or "") for field in _PROFILE_FIELDS)
     markers = (
-        "本地 BioCLIP", "具体分类单元", "建议结合", "需要结合", "待补充", "首次打开",
-        "逐步完善", "分布信息需要", "食性或营养方式需要", "当前本地", "暂无",
+        "本地 BioCLIP",
+        "具体分类单元",
+        "建议结合",
+        "需要结合",
+        "待补充",
+        "首次打开",
+        "逐步完善",
+        "资料生成中",
+        "暂无",
     )
     if any(marker in fields for marker in markers):
         return True
@@ -182,20 +233,18 @@ def species_needs_profile_refresh(species: Species) -> bool:
     return any(not str(item or "").strip() for item in required)
 
 
-_PROFILE_FIELDS = ("traits", "habitat", "distribution", "diet", "activity", "ecology_value", "threats", "conservation")
-
-
 def _apply_profile_to_species(species: Species, profile: dict[str, Any], mode: str) -> None:
+    category = normalize_category(profile.get("category"), species.category or "unknown")
     species.common_name = clean_text(profile.get("common_name_zh"), species.common_name)[:100]
     species.english_name = clean_text(profile.get("english_name"), species.english_name)[:150]
-    species.category = clean_text(profile.get("category"), species.category or "unknown")[:40]
-    species.kingdom = "Plantae" if species.category in {"plant", "angiosperm", "gymnosperm", "fern", "moss", "algae"} else "Animalia"
+    species.category = category
+    species.kingdom = "Plantae" if category in {"plant", "angiosperm", "gymnosperm", "fern", "moss", "algae"} else "Animalia"
     species.protection_level = clean_text(profile.get("protection_level"), "未列入本地重点保护名录")[:80]
     try:
         species.rarity = max(1, min(5, int(profile.get("rarity") or species.rarity or 2)))
     except (TypeError, ValueError):
         species.rarity = species.rarity or 2
-    species.color = CATEGORY_COLORS.get(species.category, CATEGORY_COLORS["unknown"])
+    species.color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"])
     for field in _PROFILE_FIELDS:
         value = clean_text(profile.get(field))
         if value:
@@ -205,7 +254,7 @@ def _apply_profile_to_species(species: Species, profile: dict[str, Any], mode: s
         species.facts = [clean_text(item) for item in facts if clean_text(item)][:6]
     if not species.facts:
         species.facts = [f"学名：{species.scientific_name}", "建议结合地点、季节和多角度照片复核识别。"]
-    species.taxonomy = {"scientific_name": species.scientific_name}
+    species.taxonomy = {"scientific_name": species.scientific_name, "category_zh": category_zh(category)}
     species.source_notes = [
         "ARK 物种百科已生成并缓存。" if mode == "ark" else "本地物种档案已创建，等待下一次联网 AI 资料补全。"
     ]
@@ -222,6 +271,7 @@ async def ensure_species_profile(
     scientific_name = scientific_name.strip()
     if not scientific_name:
         return None
+    category = normalize_category(category)
     species = db.scalar(select(Species).where(Species.scientific_name == scientific_name))
     if species and not force and not species_needs_profile_refresh(species):
         return species
@@ -231,28 +281,34 @@ async def ensure_species_profile(
     if not profile:
         profile = _known_seed(scientific_name, category, common_hint)
         common = profile["common_name_zh"]
-        profile.update(
-            {
-                "traits": f"{common}（{scientific_name}）已加入图鉴，详细资料将在 AI 百科生成成功后自动缓存。",
-                "habitat": "资料生成中。",
-                "distribution": "资料生成中。",
-                "diet": "资料生成中。",
-                "activity": "资料生成中。",
-                "ecology_value": "资料生成中。",
-                "threats": "资料生成中。",
-                "conservation": "观察时请减少干扰，不公开珍稀物种精确位置。",
-            }
-        )
+        if not profile.get("traits"):
+            profile.update(
+                {
+                    "traits": f"{common}（{scientific_name}）已加入图鉴，详细资料会在 AI 科普生成成功后自动缓存。",
+                    "habitat": "资料生成中，请结合拍摄地点和季节复核。",
+                    "distribution": "资料生成中，请以权威物种名录和本地观察记录为准。",
+                    "diet": "资料生成中。",
+                    "activity": "资料生成中。",
+                    "ecology_value": "资料生成中。",
+                    "threats": "资料生成中。",
+                    "conservation": "观察时请减少干扰，不公开珍稀物种精确位置。",
+                }
+            )
 
     common_name = clean_text(profile.get("common_name_zh"), common_hint or scientific_name)
     preferred_common = _known_seed(scientific_name, category, common_hint)["common_name_zh"]
-    if has_cjk(preferred_common):
+    if has_cjk(preferred_common) and not is_garbled(preferred_common):
         common_name = preferred_common
     elif looks_latin(common_name) or is_garbled(common_name):
         common_name = preferred_common
-    profile["common_name_zh"] = _unique_common_name(db, common_name, scientific_name)
+    profile["common_name_zh"] = _unique_common_name(
+        db,
+        common_name,
+        scientific_name,
+        current_species_id=species.id if species else None,
+    )
     profile["scientific_name"] = scientific_name
-    profile["category"] = clean_text(profile.get("category"), category or "unknown")
+    profile["category"] = normalize_category(profile.get("category"), category)
 
     if not species:
         species = Species(
@@ -285,10 +341,11 @@ async def localize_detection(db: Session, detection: Detection) -> Species | Non
     if species:
         detection.species_id = species.id
         detection.label = species.common_name
+        detection.category = normalize_category(detection.category, species.category)
         if detection.category == "unknown" or not detection.category:
             detection.category = species.category
         detection.color = species.color
-        if not detection.explanation or "BioCLIP matched" in detection.explanation:
+        if not detection.explanation or "BioCLIP matched" in detection.explanation or "本地 BioCLIP" in detection.explanation:
             detection.explanation = f"识别为{species.common_name}（{species.scientific_name}）。请结合图像细节、地点和季节继续复核。"
     return species
 
@@ -302,6 +359,7 @@ async def ensure_species_from_user_text(
 ) -> Species | None:
     species_name = species_name.strip()
     scientific_name = scientific_name.strip()
+    category = normalize_category(category)
     if scientific_name:
         return await ensure_species_profile(db, scientific_name=scientific_name, category=category, common_hint=species_name)
     if species_name:
@@ -327,7 +385,7 @@ async def ensure_species_from_user_text(
         data = _extract_json(answer or "") if answer else None
         if isinstance(data, dict):
             scientific_name = clean_text(data.get("scientific_name"))
-            category = clean_text(data.get("category"), category)
+            category = normalize_category(data.get("category"), category)
             species_name = clean_text(data.get("common_name_zh"), species_name)
     if scientific_name:
         return await ensure_species_profile(db, scientific_name=scientific_name, category=category, common_hint=species_name)
@@ -341,6 +399,7 @@ def species_knowledge_payload(species: Species) -> dict[str, Any]:
         "scientific_name": species.scientific_name,
         "english_name": species.english_name,
         "category": species.category,
+        "category_zh": category_zh(species.category),
         "protection_level": species.protection_level,
         "rarity": species.rarity,
         "color": species.color,

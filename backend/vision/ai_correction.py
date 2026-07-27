@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.services.taxon_names import normalize_category
+
 BIOLOGICAL_FINAL_CATEGORIES = {
     "unknown",
     "mammal",
@@ -42,7 +44,7 @@ def needs_ai_correction(
 ) -> bool:
     if not result:
         return True
-    normalized_category = str(category or result.get("category") or "unknown").strip().lower()
+    normalized_category = normalize_category(category or result.get("category") or "unknown")
     if normalized_category not in BIOLOGICAL_FINAL_CATEGORIES:
         return False
     confidence = _safe_float(result.get("confidence"))
@@ -87,6 +89,10 @@ def merge_ai_correction(
     ai_confidence = _safe_float(ai_result.get("confidence"))
     local_confidence = _safe_float(local_result.get("confidence"))
     accepted = bool(ai_result) and ai_confidence >= min_accept_confidence and ai_confidence >= local_confidence
+    local_scientific = str(local_result.get("scientific_name") or "").strip()
+    ai_scientific = str(ai_result.get("scientific_name") or "").strip() if ai_result else ""
+    if local_scientific and not ai_scientific:
+        accepted = False
 
     evidence = list(corrected.get("evidence") or [])
     evidence.append(
@@ -113,7 +119,7 @@ def merge_ai_correction(
         ):
             value = ai_result.get(key)
             if value not in (None, "", []):
-                corrected[key] = value
+                corrected[key] = normalize_category(value) if key == "category" else value
         current_source = str(corrected.get("model_source") or corrected.get("source") or "")
         corrected["model_source"] = f"{current_source}+ai-correction" if current_source else "ai-correction"
         corrected["ai_correction_status"] = "accepted"

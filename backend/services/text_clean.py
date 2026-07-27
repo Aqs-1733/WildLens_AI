@@ -3,7 +3,24 @@ from __future__ import annotations
 import re
 from typing import Any
 
-MOJIBAKE_HINTS = ("Ã", "Â", "�", "å", "æ", "ç", "é", "鐢", "鑷", "绯", "鏂", "濂", "鍥", "璇", "寰", "???")
+MOJIBAKE_HINTS = (
+    "脙",
+    "脗",
+    "锟",
+    "氓",
+    "忙",
+    "莽",
+    "茅",
+    "閻",
+    "閼",
+    "缁",
+    "閺",
+    "婵",
+    "閸",
+    "鐠",
+    "瀵",
+    "�",
+)
 
 
 def is_garbled(value: Any) -> bool:
@@ -11,7 +28,7 @@ def is_garbled(value: Any) -> bool:
     if not text:
         return False
     question_ratio = text.count("?") / max(1, len(text))
-    replacement_ratio = text.count("�") / max(1, len(text))
+    replacement_ratio = text.count("锟") / max(1, len(text))
     if question_ratio > 0.35 or replacement_ratio > 0.05:
         return True
     return any(token in text for token in MOJIBAKE_HINTS)

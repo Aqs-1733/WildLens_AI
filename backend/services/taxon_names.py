@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from backend.core.config import PROJECT_ROOT
 from backend.models import Species, Taxon
+from backend.services.text_clean import clean_text, is_garbled
 
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
@@ -41,6 +42,8 @@ _SCIENTIFIC_ZH: dict[str, str] = {
     "Progne subis": "紫崖燕",
     "Cecropis rufula": "赤腰燕",
     "Cardinalis cardinalis": "北美红雀",
+    "Haliaeetus leucocephalus": "白头海雕",
+    "Haliaeetus leucocephalus washingtoniensis": "白头海雕北方亚种",
     "Sciurus carolinensis": "东部灰松鼠",
     "Odocoileus virginianus": "白尾鹿",
     "Coccinella septempunctata": "七星瓢虫",
@@ -49,8 +52,15 @@ _SCIENTIFIC_ZH: dict[str, str] = {
     "Ginkgo biloba": "银杏",
     "Panthera tigris": "虎",
     "Panthera tigris tigris": "孟加拉虎",
-    "Panthera pardus": "豹",
+    "Panthera tigris altaica": "东北虎",
+    "Panthera pardus": "金钱豹",
+    "Panthera leo": "狮",
+    "Ailuropoda melanoleuca": "大熊猫",
     "Elephas maximus": "亚洲象",
+    "Elephas maximus indicus": "印度象",
+    "Giraffa camelopardalis": "长颈鹿",
+    "Giraffa camelopardalis camelopardalis": "努比亚长颈鹿",
+    "Vulpes vulpes": "赤狐",
 }
 
 _ENGLISH_ZH: dict[str, str] = {
@@ -61,18 +71,104 @@ _ENGLISH_ZH: dict[str, str] = {
     "european red-rumped swallow": "赤腰燕",
     "barn swallow": "家燕",
     "pearl-breasted swallow": "珍珠胸燕",
+    "asian elephant": "亚洲象",
+    "indian elephant": "印度象",
+    "bald eagle": "白头海雕",
+    "giant panda": "大熊猫",
+    "giraffe": "长颈鹿",
+    "red fox": "赤狐",
+    "ginkgo": "银杏",
+    "ginkgo biloba": "银杏",
 }
 
 _SUBSPECIES_ZH: dict[str, str] = {
     "kansuensis": "甘肃亚种",
     "nycticorax": "指名亚种",
     "tigris": "指名亚种",
+    "altaica": "东北亚种",
+    "indicus": "印度亚种",
+    "camelopardalis": "指名亚种",
+    "washingtoniensis": "北方亚种",
     "sinensis": "中华亚种",
     "japonicus": "日本亚种",
     "coreanus": "朝鲜亚种",
     "mandarinus": "华东亚种",
     "formosanus": "台湾亚种",
     "hainanus": "海南亚种",
+}
+
+CANONICAL_CATEGORIES = {
+    "mammal",
+    "bird",
+    "reptile",
+    "amphibian",
+    "fish",
+    "insect",
+    "arachnid",
+    "mollusk",
+    "crustacean",
+    "invertebrate",
+    "plant",
+    "angiosperm",
+    "gymnosperm",
+    "fern",
+    "moss",
+    "algae",
+    "fungus",
+    "lichen",
+    "person",
+    "vehicle",
+    "phenomenon",
+    "weather",
+    "fire",
+    "smoke",
+    "unknown",
+}
+
+_CATEGORY_ALIASES: dict[str, str] = {
+    "animal": "mammal",
+    "animals": "mammal",
+    "mammalia": "mammal",
+    "mammal species": "mammal",
+    "aves": "bird",
+    "bird species": "bird",
+    "plant species": "plant",
+    "plantae": "plant",
+    "tracheophyta": "plant",
+    "自然": "phenomenon",
+    "自然现象": "phenomenon",
+    "天气": "weather",
+    "天气现象": "weather",
+    "火": "fire",
+    "火焰": "fire",
+    "烟": "smoke",
+    "烟雾": "smoke",
+    "动物": "mammal",
+    "哺乳动物": "mammal",
+    "哺乳纲": "mammal",
+    "鸟": "bird",
+    "鸟类": "bird",
+    "鸟纲": "bird",
+    "爬行动物": "reptile",
+    "两栖动物": "amphibian",
+    "鱼": "fish",
+    "鱼类": "fish",
+    "昆虫": "insect",
+    "蛛形动物": "arachnid",
+    "软体动物": "mollusk",
+    "甲壳动物": "crustacean",
+    "无脊椎动物": "invertebrate",
+    "植物": "plant",
+    "被子植物": "angiosperm",
+    "裸子植物": "gymnosperm",
+    "蕨类": "fern",
+    "苔藓": "moss",
+    "藻类": "algae",
+    "真菌": "fungus",
+    "地衣": "lichen",
+    "人": "person",
+    "人物": "person",
+    "车辆": "vehicle",
 }
 
 _CATEGORY_ZH: dict[str, str] = {
@@ -89,16 +185,18 @@ _CATEGORY_ZH: dict[str, str] = {
     "plant": "植物",
     "angiosperm": "被子植物",
     "gymnosperm": "裸子植物",
-    "fern": "蕨类",
-    "moss": "苔藓",
+    "fern": "蕨类植物",
+    "moss": "苔藓植物",
     "algae": "藻类",
     "fungus": "真菌",
     "lichen": "地衣",
+    "person": "人物",
+    "vehicle": "车辆",
     "phenomenon": "自然现象",
     "weather": "天气现象",
     "fire": "火情候选",
     "smoke": "烟雾候选",
-    "unknown": "待确认目标",
+    "unknown": "低置信度候选",
 }
 
 
@@ -106,8 +204,42 @@ def has_cjk(value: str | None) -> bool:
     return bool(value and _CJK_RE.search(value))
 
 
+def normalize_category(value: Any, default: str = "unknown") -> str:
+    raw = clean_text(value, "").strip().lower()
+    if not raw:
+        return default
+    raw = raw.replace("_", " ").replace("-", " ")
+    compact = raw.replace(" ", "")
+    if raw in CANONICAL_CATEGORIES:
+        return raw
+    if compact in CANONICAL_CATEGORIES:
+        return compact
+    if raw in _CATEGORY_ALIASES:
+        return _CATEGORY_ALIASES[raw]
+    if compact in _CATEGORY_ALIASES:
+        return _CATEGORY_ALIASES[compact]
+    if "哺乳" in raw:
+        return "mammal"
+    if "鸟" in raw or "avian" in raw:
+        return "bird"
+    if "爬行" in raw:
+        return "reptile"
+    if "两栖" in raw:
+        return "amphibian"
+    if "昆虫" in raw:
+        return "insect"
+    if "植物" in raw or "plant" in raw:
+        return "plant"
+    if "真菌" in raw or "fung" in raw:
+        return "fungus"
+    if "现象" in raw or "weather" in raw:
+        return "phenomenon"
+    return default
+
+
 def category_zh(category: str | None) -> str:
-    return _CATEGORY_ZH.get(str(category or "unknown").lower(), str(category or "待确认"))
+    normalized = normalize_category(category)
+    return _CATEGORY_ZH.get(normalized, "低置信度候选")
 
 
 @lru_cache(maxsize=1)
@@ -120,7 +252,7 @@ def _target_species_names() -> dict[str, str]:
             for item in items if isinstance(items, list) else []:
                 scientific = str(item.get("scientific_name") or "").strip()
                 common = str(item.get("common_name") or "").strip()
-                if scientific and has_cjk(common):
+                if scientific and has_cjk(common) and not is_garbled(common):
                     names[scientific.lower()] = common
         except (OSError, json.JSONDecodeError):
             pass
@@ -131,7 +263,7 @@ def _target_species_names() -> dict[str, str]:
                 for row in csv.DictReader(handle):
                     scientific = str(row.get("scientific_name") or "").strip()
                     common = str(row.get("common_name") or "").strip()
-                    if scientific and has_cjk(common):
+                    if scientific and has_cjk(common) and not is_garbled(common):
                         names[scientific.lower()] = common
         except OSError:
             pass
@@ -155,8 +287,7 @@ def _subspecies_name(scientific_name: str) -> str:
     base_zh = _SCIENTIFIC_ZH.get(base) or _target_species_names().get(base.lower())
     if not base_zh:
         return ""
-    epithet = parts[2].lower()
-    suffix = _SUBSPECIES_ZH.get(epithet)
+    suffix = _SUBSPECIES_ZH.get(parts[2].lower())
     return f"{base_zh}{suffix}" if suffix else f"{base_zh}亚种"
 
 
@@ -166,9 +297,9 @@ def resolve_chinese_name(
     current_name: str | None = "",
     category: str | None = "",
 ) -> str:
-    current = str(current_name or "").strip()
+    current = clean_text(current_name, "").strip()
     scientific = _clean_scientific(scientific_name)
-    if has_cjk(current) and current != "??":
+    if has_cjk(current) and current != "??" and not is_garbled(current):
         return current
     english_name = current.lower()
     if english_name in _ENGLISH_ZH:
@@ -185,37 +316,37 @@ def resolve_chinese_name(
         species = db.scalar(
             select(Species).where(func.lower(Species.scientific_name) == scientific.lower())
         )
-        if species and has_cjk(species.common_name):
+        if species and has_cjk(species.common_name) and not is_garbled(species.common_name):
             return species.common_name
         taxon = db.scalar(
             select(Taxon).where(func.lower(Taxon.scientific_name) == scientific.lower())
         )
-        if taxon and has_cjk(taxon.common_name_zh):
+        if taxon and has_cjk(taxon.common_name_zh) and not is_garbled(taxon.common_name_zh):
             return taxon.common_name_zh
         base = _base_species(scientific)
         if base and base != scientific:
             species = db.scalar(
                 select(Species).where(func.lower(Species.scientific_name) == base.lower())
             )
-            if species and has_cjk(species.common_name):
+            if species and has_cjk(species.common_name) and not is_garbled(species.common_name):
                 return species.common_name
             taxon = db.scalar(
                 select(Taxon).where(func.lower(Taxon.scientific_name) == base.lower())
             )
-            if taxon and has_cjk(taxon.common_name_zh):
+            if taxon and has_cjk(taxon.common_name_zh) and not is_garbled(taxon.common_name_zh):
                 return taxon.common_name_zh
     if scientific:
         return scientific
-    if current:
+    if current and not is_garbled(current):
         return current
     return category_zh(category)
 
 
 def localize_candidate(db: Session | None, candidate: dict[str, Any]) -> dict[str, Any]:
     output = dict(candidate)
+    category = normalize_category(output.get("category"), str(output.get("category") or "unknown"))
     scientific = str(output.get("scientific_name") or output.get("name") or "").strip()
     current = str(output.get("common_name") or output.get("name") or "").strip()
-    category = str(output.get("category") or "")
     scientific_zh = resolve_chinese_name(db, scientific, "", category)
     zh = scientific_zh if has_cjk(scientific_zh) else resolve_chinese_name(db, scientific, current, category)
     if zh:
@@ -224,22 +355,25 @@ def localize_candidate(db: Session | None, candidate: dict[str, Any]) -> dict[st
         output["name"] = zh
     if scientific:
         output["scientific_name"] = scientific
+    output["category"] = category
+    output["category_zh"] = category_zh(category)
     return output
 
 
 def localize_prediction(db: Session | None, result: dict[str, Any]) -> dict[str, Any]:
     output = dict(result)
+    category = normalize_category(output.get("category"))
     scientific = str(output.get("scientific_name") or "").strip()
     zh = resolve_chinese_name(
         db,
         scientific,
         str(output.get("common_name") or output.get("label") or ""),
-        str(output.get("category") or ""),
+        category,
     )
     if zh:
         output["common_name"] = zh
         output["label"] = zh
-    category = str(output.get("category") or "unknown").lower()
+    output["category"] = category
     if "bioclip" in str(output.get("model_source") or output.get("source") or "").lower():
         output["explanation"] = (
             f"本地 BioCLIP 将图像向量与 400721 个物种视觉原型检索后，"

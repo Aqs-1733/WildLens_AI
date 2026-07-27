@@ -58,7 +58,7 @@ def review_detection(
 ) -> dict:
     item = db.get(Detection, detection_id)
     if not item:
-        raise HTTPException(status_code=404, detail="妫€娴嬭褰曚笉瀛樺湪")
+        raise HTTPException(status_code=404, detail="检测记录不存在")
     species = db.get(Species, payload.species_id) if payload.species_id else None
     if payload.species_id and not species:
         raise HTTPException(status_code=404, detail="物种不存在")

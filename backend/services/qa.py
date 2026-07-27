@@ -119,7 +119,7 @@ def _selected_detection_context(detection: Detection | None) -> str:
         return ""
     evidence = "；".join(str(item) for item in (detection.evidence or [])) or "未记录"
     return (
-        f"{detection.label} / {detection.scientific_name or '学名待确认'}；"
+        f"{detection.label} / {detection.scientific_name or '未返回学名'}；"
         f"类别：{detection.category}；置信度：{detection.confidence:.0%}；"
         f"行为：{detection.behavior or '未判断'}；自然现象：{detection.phenomenon or '无'}；"
         f"可见证据：{evidence}；模型解释：{detection.explanation or '未提供'}；"

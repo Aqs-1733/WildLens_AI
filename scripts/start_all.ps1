@@ -46,6 +46,15 @@ try {
   uv sync --extra bioclip
   uv run python scripts/migrate_db.py
 
+  $speciesNetScript = Join-Path $PSScriptRoot "start_speciesnet_cpu.ps1"
+  $speciesNetPython = Join-Path $Root ".venv-speciesnet-cpu\Scripts\python.exe"
+  $speciesNetCache = Join-Path $Root "models\speciesnet_offline"
+  if ((Test-Path $speciesNetScript) -and (Test-Path $speciesNetPython) -and (Test-Path $speciesNetCache)) {
+    & $speciesNetScript
+  } else {
+    Write-Warning "SpeciesNet CPU service was not started because its Python environment or offline cache is missing."
+  }
+
   $uv = (Get-Command uv).Source
   $npm = (Get-Command npm).Source
   Start-Managed "backend" $uv @("run", "python", "backend/main.py") $Root
@@ -61,4 +70,3 @@ try {
 } finally {
   Pop-Location
 }
-

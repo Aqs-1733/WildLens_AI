@@ -3,7 +3,16 @@ from __future__ import annotations
 import math
 from typing import Any
 
-SPECIESNET_OBJECT_LABELS = {"animal", "human", "vehicle", "blank"}
+SPECIESNET_OBJECT_LABELS = {
+    "animal",
+    "human",
+    "vehicle",
+    "blank",
+    "unknown",
+    "no cv",
+    "no cv result",
+    "no computer vision result",
+}
 SPECIESNET_EXCLUDED_FINAL_CATEGORIES = {
     "plant",
     "angiosperm",
@@ -36,8 +45,18 @@ def parse_speciesnet_label(label: str) -> dict[str, Any]:
     uuid, class_name, order_name, family, genus, species, common_name = parts[:7]
     genus_l = _clean_text(genus)
     species_l = _clean_text(species)
-    scientific_name = f"{genus_l.capitalize()} {species_l}".strip() if genus_l and species_l else ""
-    if species_l and genus_l:
+    common_name_l = _clean_text(common_name)
+    no_cv_result = "no cv" in " ".join((genus_l, species_l, common_name_l))
+    scientific_name = (
+        f"{genus_l.capitalize()} {species_l}".strip()
+        if genus_l and species_l and not no_cv_result
+        else ""
+    )
+    if no_cv_result:
+        rank = "object"
+        genus_l = ""
+        species_l = ""
+    elif species_l and genus_l:
         rank = "species"
     elif genus_l:
         rank = "genus"
@@ -57,7 +76,7 @@ def parse_speciesnet_label(label: str) -> dict[str, Any]:
         "family": _clean_text(family),
         "genus": genus_l,
         "species": species_l,
-        "common_name": _clean_text(common_name),
+        "common_name": common_name_l,
         "scientific_name": scientific_name,
         "rank": rank,
     }
@@ -331,18 +350,36 @@ def _best_speciesnet_detection_confidence(result: dict[str, Any]) -> float:
     )
 
 
+def _is_speciesnet_object_only(result: dict[str, Any] | None, object_label: str = "") -> bool:
+    if not result:
+        return False
+    if result.get("scientific_name"):
+        return False
+    label = object_label or speciesnet_category(result)
+    return _clean_text(label) in SPECIESNET_OBJECT_LABELS
+
+
+def _bioclip_specific_enough(evidence: dict[str, Any] | None, local_confidence: float) -> bool:
+    if not evidence:
+        return False
+    if not str(evidence.get("scientific_name") or "").strip():
+        return False
+    similarity = _safe_float(evidence.get("similarity"))
+    return local_confidence >= 0.55 or similarity >= 0.78
+
+
 def _speciesnet_as_result(result: dict[str, Any]) -> dict[str, Any]:
     taxonomy = result.get("taxonomy") or {}
     class_name = _clean_text(taxonomy.get("class_name"))
     common_name = _clean_text(result.get("common_name"))
     scientific_name = result.get("scientific_name") or ""
     detection_confidence = _best_speciesnet_detection_confidence(result)
-    if not scientific_name and common_name in {"", "animal", "blank"}:
+    if not scientific_name and common_name in SPECIESNET_OBJECT_LABELS:
         return {
-            "common_name": "待确认动物",
+            "common_name": "低置信度动物候选",
             "scientific_name": "",
             "category": "unknown",
-            "confidence": detection_confidence or result.get("score") or 0.0,
+            "confidence": detection_confidence or min(_safe_float(result.get("score")), 0.54),
             "alternatives": [
                 {
                     "name": item.get("common_name") or item.get("scientific_name") or "",
@@ -409,6 +446,11 @@ def fuse_species_results(
     active_learning_evidence = compact_active_learning_evidence(existing_result)
     local_evidence = compact_local_evidence(existing_result)
     bioclip_weak = bool(bioclip_evidence and bioclip_evidence.get("is_weak"))
+    active_learning_confident = bool(
+        active_learning_evidence
+        and active_learning_evidence.get("accepted")
+        and active_learning_evidence.get("applied")
+    )
     warnings: list[str] = []
     final_result = dict(existing_result or {})
     category_l = _clean_text(original_category)
@@ -420,7 +462,7 @@ def fuse_species_results(
             if decision == "unknown":
                 category = category_l or _clean_text(output_result.get("category")) or "unknown"
                 output_result["common_name"] = (
-                    "待确认动物" if category in {"unknown", "animal", "mammal"} else "待确认目标"
+                    "低置信度动物候选" if category in {"unknown", "animal", "mammal"} else "低置信度候选"
                 )
                 output_result["scientific_name"] = ""
                 output_result["category"] = category
@@ -466,7 +508,7 @@ def fuse_species_results(
     if not speciesnet_result:
         decision = (
             "unknown"
-            if bioclip_evidence and bioclip_weak
+            if bioclip_evidence and bioclip_weak and not active_learning_confident
             else "bioclip_only"
             if bioclip_evidence
             else "fallback"
@@ -501,9 +543,25 @@ def fuse_species_results(
         sn_scientific = sn_tax.get("scientific_name", "")
         local_scientific = local_tax.get("scientific_name", "")
         local_conf = _safe_float(final_result.get("confidence") if final_result else None)
-        local_reliable = bool(final_result) and local_conf >= min_score and not bioclip_weak
+        local_reliable = bool(final_result) and local_conf >= min_score and (
+            not bioclip_weak or active_learning_confident
+        )
+        speciesnet_object_only = _is_speciesnet_object_only(speciesnet_result, object_label)
 
-        if not sn_scientific and bioclip_evidence and local_reliable:
+        if (
+            speciesnet_object_only
+            and bioclip_evidence
+            and local_scientific
+            and _bioclip_specific_enough(bioclip_evidence, local_conf)
+        ):
+            decision = "review" if bioclip_weak and not active_learning_confident else "bioclip_only"
+            final_result = _with_source(final_result, "speciesnet-detector")
+            final_result["confidence"] = local_conf
+            warnings.append(
+                "SpeciesNet detected an animal but did not produce a species label; "
+                "the concrete BioCLIP candidate was retained for review."
+            )
+        elif not sn_scientific and bioclip_evidence and local_reliable:
             decision = "bioclip_only"
         elif bioclip_evidence and bioclip_weak and score >= strong_score:
             decision = "speciesnet_only"

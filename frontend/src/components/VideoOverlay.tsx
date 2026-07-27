@@ -183,7 +183,6 @@ export default function VideoOverlay({
               <span style={{ background: track.color }}>
                 {showLabels ? `${track.label} #${track.track_id} · ${(track.confidence * 100).toFixed(0)}%` : ''}
               </span>
-              <em>{showLabels ? track.scientific_name : ''}</em>
             </button>
           ))}
         </div>

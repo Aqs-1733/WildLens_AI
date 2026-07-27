@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import mimetypes
+import re
 import uuid
 from pathlib import Path
 
@@ -38,7 +39,7 @@ from backend.schemas import (
 )
 from backend.services.species_guides import guide_for_detection
 from backend.services.species_profile import localize_detection
-from backend.services.taxon_names import localize_candidate, resolve_chinese_name
+from backend.services.taxon_names import localize_candidate, normalize_category, resolve_chinese_name
 from backend.vision.learning_feedback import learn_from_detection_correction
 from backend.vision.photo_pipeline import analyze_photo
 
@@ -69,6 +70,11 @@ PLANT_CATEGORIES = {
     "lichen",
 }
 PHENOMENON_CATEGORIES = {"phenomenon", "fire", "smoke", "weather"}
+DISPLAY_LATIN_PAREN_RE = re.compile(r"[（(]\s*[A-Z][A-Za-z.'-]*(?:\s+[a-z][A-Za-z.'-]*){1,4}\s*[）)]")
+DISPLAY_CJK_RE = re.compile(r"[\u3400-\u9fff]")
+DISPLAY_GARBLED_RE = re.compile(r"�|\?{3,}|Ã|å|ç|¤")
+DISPLAY_UNCERTAIN_RE = re.compile(r"低置信度|待确认|疑似|候选|unknown|unidentified", re.IGNORECASE)
+DISPLAY_EXCLUDED_CATEGORIES = {"person", "vehicle", "human"}
 
 RARITY_BY_CATEGORY = {
     "mammal": 3,
@@ -119,6 +125,32 @@ CITY_COORDINATES: dict[str, tuple[float, float]] = {
     "拉萨": (29.6520, 91.1721),
     "海口": (20.0440, 110.1999),
 }
+
+
+def _targets_from_scopes(scopes: str) -> list[str]:
+    raw = {item.strip().lower() for item in (scopes or "").split(",") if item.strip()}
+    if not raw:
+        return ["animals", "plants", "phenomena", "behaviors"]
+    aliases = {
+        "animal": "animals",
+        "animals": "animals",
+        "mammal": "animals",
+        "bird": "animals",
+        "plant": "plants",
+        "plants": "plants",
+        "fungus": "fungi",
+        "fungi": "fungi",
+        "insect": "animals",
+        "phenomenon": "phenomena",
+        "phenomena": "phenomena",
+        "weather": "phenomena",
+        "behavior": "behaviors",
+        "behaviors": "behaviors",
+    }
+    targets = {aliases.get(item, item) for item in raw}
+    if "behaviors" in targets:
+        targets.add("animals")
+    return [item for item in ["animals", "plants", "fungi", "phenomena", "behaviors"] if item in targets]
 
 
 def _location_payload(
@@ -192,6 +224,7 @@ def _object_out(db: Session, item: Detection) -> PhotoObjectOut:
         track_id=item.track_id,
         category=item.category,
         label=label,
+        common_name_zh=label,
         scientific_name=item.scientific_name,
         confidence=item.confidence,
         bbox=item.bbox or {},
@@ -244,6 +277,16 @@ def _discovery_image_url(db: Session, detection: Detection) -> str:
     return f"/media/results/{output.name}" if output.exists() else ""
 
 
+def _is_placeholder_image_url(value: str | None) -> bool:
+    text = str(value or "").strip().lower()
+    return not text or ("/showcase_" in text and text.endswith(".png"))
+
+
+def _touch_species_image(species: Species | None, image_url: str) -> None:
+    if species and image_url and _is_placeholder_image_url(species.image_url):
+        species.image_url = image_url
+
+
 def _record_type(detection: Detection) -> str:
     if detection.category in PHENOMENON_CATEGORIES or detection.phenomenon:
         return "phenomenon"
@@ -252,9 +295,40 @@ def _record_type(detection: Detection) -> str:
     return "species"
 
 
+def _clean_record_title(db: Session, record: DiscoveryRecord) -> str:
+    title = record.phenomenon or record.behavior or resolve_chinese_name(
+        db, record.scientific_name, record.title, record.category
+    )
+    title = DISPLAY_LATIN_PAREN_RE.sub("", str(title or "")).strip()
+    return " ".join(title.split())
+
+
+def _is_clean_observation(record: DiscoveryRecord, title: str) -> bool:
+    category = normalize_category(record.category)
+    if category in DISPLAY_EXCLUDED_CATEGORIES:
+        return False
+    if not title or not DISPLAY_CJK_RE.search(title):
+        return False
+    if DISPLAY_GARBLED_RE.search(title) or DISPLAY_UNCERTAIN_RE.search(title):
+        return False
+    return True
+
+
+def _analytics_group(category: str) -> str | None:
+    normalized = normalize_category(category)
+    if normalized in ANIMAL_CATEGORIES:
+        return "animal"
+    if normalized in PLANT_CATEGORIES:
+        return "plant"
+    if normalized in PHENOMENON_CATEGORIES:
+        return "nature"
+    return None
+
+
 def _rarity_for(category: str, scientific_name: str, title: str) -> int:
+    category = normalize_category(category)
     text = f"{scientific_name} {title}"
-    if any(token in text for token in ("tigris", "altaica", "豹", "虎", "象", "鹤")):
+    if any(token in text for token in ("tigris", "altaica", "豹", "虎", "象", "雕")):
         return 5
     if any(token in text for token in ("Panthera", "Elephas", "Ursus", "Ailuropoda")):
         return 5
@@ -264,6 +338,7 @@ def _rarity_for(category: str, scientific_name: str, title: str) -> int:
 def _ensure_species_for_detection(db: Session, detection: Detection) -> Species | None:
     if detection.species_id:
         return db.get(Species, detection.species_id)
+    detection.category = normalize_category(detection.category)
     if detection.category not in (ANIMAL_CATEGORIES | PLANT_CATEGORIES):
         return None
     scientific = str(detection.scientific_name or "").strip()
@@ -272,10 +347,12 @@ def _ensure_species_for_detection(db: Session, detection: Detection) -> Species 
     species = db.scalar(select(Species).where(Species.scientific_name == scientific))
     if species:
         detection.species_id = species.id
+        detection.label = resolve_chinese_name(db, scientific, detection.label, detection.category)
         return species
     title = resolve_chinese_name(db, scientific, detection.label, detection.category)
-    if db.scalar(select(Species).where(Species.common_name == title)):
-        title = f"{title}（{scientific.split()[0] if scientific else detection.category}）"
+    duplicate = db.scalar(select(Species).where(Species.common_name == title))
+    if duplicate and duplicate.scientific_name != scientific:
+        title = f"{title}（{scientific}）"[:100]
     taxon = db.scalar(select(Taxon).where(Taxon.scientific_name == scientific))
     species = Species(
         common_name=title,
@@ -286,13 +363,13 @@ def _ensure_species_for_detection(db: Session, detection: Detection) -> Species 
         protection_level=(taxon.conservation_status if taxon and taxon.conservation_status else "未列入本地保护名录"),
         rarity=_rarity_for(detection.category, scientific, title),
         color=detection.color,
-        habitat="已由真实识别记录创建，栖息环境会在首次打开科普时生成并缓存。",
+        habitat="已由真实识别记录创建；打开中文科普后会生成并缓存详细栖息环境。",
         distribution="分布信息会结合物种资料与用户观察地点逐步完善。",
         traits=detection.explanation or "由本地识别结果创建的物种条目，建议结合多角度照片复核。",
-        diet="食性会在首次打开科普时生成并缓存。",
-        activity="活动规律会在首次打开科普时生成并缓存。",
-        ecology_value="生态价值会在首次打开科普时生成并缓存。",
-        threats="主要威胁会在首次打开科普时生成并缓存。",
+        diet="打开中文科普后会生成并缓存食性资料。",
+        activity="打开中文科普后会生成并缓存活动规律。",
+        ecology_value="打开中文科普后会生成并缓存生态价值。",
+        threats="打开中文科普后会生成并缓存主要威胁。",
         conservation="不公开珍稀物种精确位置，避免干扰。",
         taxonomy={},
         facts=[],
@@ -400,6 +477,7 @@ def _ensure_discovery_record(
             existing.note = note
         if not existing.image_url:
             existing.image_url = _discovery_image_url(db, detection)
+        _touch_species_image(species, existing.image_url)
         if location:
             _ensure_location(db, existing, location, species)
         _touch_collection(db, user, species, stars=stars, increment=False)
@@ -422,6 +500,7 @@ def _ensure_discovery_record(
     )
     db.add(record)
     db.flush()
+    _touch_species_image(species, record.image_url)
     if location:
         _ensure_location(db, record, location, species)
     _touch_collection(db, user, species, stars=stars, increment=True)
@@ -432,6 +511,7 @@ def _ensure_discovery_record(
 async def identify_photo(
     file: UploadFile = File(...),
     hint: str = Form(default=""),
+    scopes: str = Form(default="animals,plants,fungi,phenomena,behaviors"),
     latitude: float | None = Form(default=None),
     longitude: float | None = Form(default=None),
     location_accuracy: float | None = Form(default=None),
@@ -477,6 +557,7 @@ async def identify_photo(
             payload,
             content_type,
             hint,
+            enabled_targets=_targets_from_scopes(scopes),
         )
     except ValueError as exc:
         destination.unlink(missing_ok=True)
@@ -545,6 +626,7 @@ async def reidentify_photo(
         image_bytes,
         content_type,
         payload.hint,
+        enabled_targets=_targets_from_scopes(payload.scopes),
     )
     location = _location_payload(address=payload.address or payload.hint)
     for item in detections:
@@ -577,6 +659,7 @@ async def detection_guide(
     job = db.get(AnalysisJob, detection.job_id)
     if not job or (user.role == "public" and job.owner_id != user.id):
         raise HTTPException(status_code=403, detail="无权访问该识别结果")
+    detection.category = normalize_category(detection.category)
     species = await localize_detection(db, detection)
     if species:
         _touch_collection(db, user, species, stars=max(1, min(5, species.rarity)), increment=False)
@@ -584,7 +667,12 @@ async def detection_guide(
     guide = await guide_for_detection(db, detection)
     species = db.get(Species, detection.species_id) if detection.species_id else species
     if species:
-        species.common_name = guide.get("common_name_zh") or species.common_name
+        guide_name = str(guide.get("common_name_zh") or "").strip()
+        if guide_name:
+            duplicate = db.scalar(select(Species).where(Species.common_name == guide_name))
+            if not duplicate or duplicate.id == species.id or duplicate.scientific_name == species.scientific_name:
+                species.common_name = guide_name
+        species.category = normalize_category(species.category)
         species.traits = guide.get("appearance") or species.traits
         species.habitat = guide.get("habitat") or species.habitat
         species.activity = guide.get("behavior") or species.activity
@@ -619,6 +707,9 @@ def save_observation(
         )
     )
     if existing:
+        species = _ensure_species_for_detection(db, detection)
+        if not existing.image_url:
+            existing.image_url = _discovery_image_url(db, detection)
         _ensure_location(
             db,
             existing,
@@ -634,8 +725,9 @@ def save_observation(
                 location_source=payload.location_source,
                 privacy_level=payload.privacy_level,
             ),
-            _ensure_species_for_detection(db, detection),
+            species,
         )
+        _touch_species_image(species, existing.image_url)
         if payload.note:
             existing.note = payload.note
         db.commit()
@@ -666,6 +758,7 @@ def save_observation(
     )
     db.add(record)
     db.flush()
+    _touch_species_image(species, record.image_url)
 
     _ensure_location(
         db,
@@ -736,36 +829,39 @@ def observation_map(
         )
         .order_by(DiscoveryRecord.created_at.desc())
     ).all()
-    return [
-        {
-            "id": record.id,
-            "title": record.phenomenon or record.behavior or resolve_chinese_name(
-                db, record.scientific_name, record.title, record.category
-            ),
-            "scientific_name": record.scientific_name,
-            "category": record.category,
-            "image_url": record.image_url,
-            "confidence": record.confidence,
-            "behavior": record.behavior,
-            "phenomenon": record.phenomenon,
-            "observed_at": location.observed_at,
-            "latitude": location.latitude,
-            "longitude": location.longitude,
-            "province": location.province,
-            "city": location.city,
-            "district": location.district,
-            "privacy_level": location.privacy_level,
-            "is_first": db.scalar(
-                select(func.count(DiscoveryRecord.id)).where(
-                    DiscoveryRecord.user_id == user.id,
-                    DiscoveryRecord.species_id == record.species_id,
-                    DiscoveryRecord.created_at < record.created_at,
+    payload = []
+    for record, location in rows:
+        title = _clean_record_title(db, record)
+        if not _is_clean_observation(record, title):
+            continue
+        payload.append(
+            {
+                "id": record.id,
+                "title": title,
+                "scientific_name": record.scientific_name,
+                "category": normalize_category(record.category),
+                "image_url": record.image_url,
+                "confidence": record.confidence,
+                "behavior": record.behavior,
+                "phenomenon": record.phenomenon,
+                "observed_at": location.observed_at,
+                "latitude": location.latitude,
+                "longitude": location.longitude,
+                "province": location.province,
+                "city": location.city,
+                "district": location.district,
+                "privacy_level": location.privacy_level,
+                "is_first": db.scalar(
+                    select(func.count(DiscoveryRecord.id)).where(
+                        DiscoveryRecord.user_id == user.id,
+                        DiscoveryRecord.species_id == record.species_id,
+                        DiscoveryRecord.created_at < record.created_at,
+                    )
                 )
-            )
-            == 0,
-        }
-        for record, location in rows
-    ]
+                == 0,
+            }
+        )
+    return payload
 
 
 @router.get("/observations/summary")
@@ -780,9 +876,9 @@ def observation_summary(
     ).all()
     grouped: dict[str, dict] = {}
     for record in records:
-        title = record.phenomenon or record.behavior or resolve_chinese_name(
-            db, record.scientific_name, record.title, record.category
-        )
+        title = _clean_record_title(db, record)
+        if not _is_clean_observation(record, title):
+            continue
         key = (
             f"species:{record.species_id}"
             if record.species_id
@@ -809,6 +905,8 @@ def observation_summary(
             item["category"] = record.category
             item["last_discovered_at"] = record.created_at
             item["latest_record_id"] = record.id
+            item["latest_image_url"] = record.image_url or item["latest_image_url"]
+        elif record.image_url and not item["latest_image_url"]:
             item["latest_image_url"] = record.image_url
     return sorted(grouped.values(), key=lambda item: item["last_discovered_at"], reverse=True)
 
@@ -909,16 +1007,34 @@ def observation_analytics(
     )
     species_counts: dict[str, int] = {}
     category_counts: dict[str, int] = {}
+    animal_counts: dict[str, int] = {}
+    plant_counts: dict[str, int] = {}
+    nature_counts: dict[str, int] = {}
     behavior_counts: dict[str, int] = {}
     phenomenon_counts: dict[str, int] = {}
     date_counts: dict[str, int] = {}
     located = 0
     first_keys: set[str] = set()
+    valid_records: list[DiscoveryRecord] = []
     for record in records:
-        key = str(record.species_id) if record.species_id else f"{record.category}:{record.title}"
+        title = _clean_record_title(db, record)
+        if not _is_clean_observation(record, title):
+            continue
+        group = _analytics_group(record.category)
+        if not group:
+            continue
+        valid_records.append(record)
+        category = normalize_category(record.category)
+        key = str(record.species_id) if record.species_id else f"{category}:{title}"
         first_keys.add(key)
-        species_counts[record.title] = species_counts.get(record.title, 0) + 1
-        category_counts[record.category] = category_counts.get(record.category, 0) + 1
+        species_counts[title] = species_counts.get(title, 0) + 1
+        category_counts[category] = category_counts.get(category, 0) + 1
+        if group == "animal":
+            animal_counts[category] = animal_counts.get(category, 0) + 1
+        elif group == "plant":
+            plant_counts[category] = plant_counts.get(category, 0) + 1
+        else:
+            nature_counts[category] = nature_counts.get(category, 0) + 1
         if record.behavior:
             behavior_counts[record.behavior] = behavior_counts.get(record.behavior, 0) + 1
         if record.phenomenon:
@@ -942,13 +1058,16 @@ def observation_analytics(
 
     return {
         "summary": {
-            "observations": len(records),
+            "observations": len(valid_records),
             "unique_taxa": len(first_keys),
             "located": located,
-            "repeat_observations": max(0, len(records) - len(first_keys)),
+            "repeat_observations": max(0, len(valid_records) - len(first_keys)),
         },
         "species_counts": ranked(species_counts),
         "category_counts": ranked(category_counts, 30),
+        "animal_counts": ranked(animal_counts, 30),
+        "plant_counts": ranked(plant_counts, 30),
+        "nature_counts": ranked(nature_counts, 30),
         "behavior_counts": ranked(behavior_counts),
         "phenomenon_counts": ranked(phenomenon_counts),
         "timeline": [

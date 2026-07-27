@@ -13,6 +13,7 @@ from backend.core.database import get_db
 from backend.core.config import get_settings
 from backend.deps import get_current_user
 from backend.models import (
+    Detection,
     DiscoveryRecord,
     ObservationLocation,
     QAConversation,
@@ -53,7 +54,8 @@ CITY_COORDINATES: dict[str, tuple[float, float]] = {
 
 KNOWN_NAME_RE = re.compile(r"[\u4e00-\u9fffA-Za-z][\u4e00-\u9fffA-Za-z\s.-]{1,80}")
 LOCATION_PATTERNS = (
-    re.compile(r"(?:地点|位置|地址)\s*(?:是|在|为|:|：)?\s*([\u4e00-\u9fffA-Za-z0-9·.\-\s]{2,80})"),
+    re.compile(r"(?:地点|位置|地址)\s*(?:改为|修改为|更改为|更新为|设为|放到|是|在|为|:|：)\s*([\u4e00-\u9fffA-Za-z0-9·.\-\s]{2,80})"),
+    re.compile(r"(?:登记在|记录在|加入到)\s*([\u4e00-\u9fffA-Za-z0-9·.\-\s]{2,80})"),
     re.compile(r"(?:在|位于)\s*([\u4e00-\u9fffA-Za-z0-9·.\-\s]{2,80}?)(?:发现|看到|拍到|观察到|加入|记录|$)"),
 )
 
@@ -169,12 +171,34 @@ async def ask(
         raise HTTPException(status_code=404, detail="聊天记录不存在")
     if conversation.title in {"新的自然问答", "自然智能问答"} or len(conversation.title) < 6:
         conversation.title = clean_title(payload.question, fallback="新的自然问答")
+    mutation_intent = _record_mutation_intent(payload.question)
     if species:
         conversation.species_id = species.id
-        _touch_collection(db, user, species)
-        _maybe_create_footprint(db, user, species, location_text, payload.question, payload.image_url)
+        if not mutation_intent:
+            _touch_collection(db, user, species)
+            _maybe_create_footprint(db, user, species, location_text, payload.question, payload.image_url)
     user_content = f"{payload.question}\n\n[图片附件] {payload.image_url}" if payload.image_url else payload.question
     db.add(QAMessage(conversation_id=conversation.id, role="user", content=user_content))
+    mutation = await _handle_record_mutation(db, user, payload, species, location_text)
+    if mutation:
+        answer, sources = mutation
+        db.add(
+            QAMessage(
+                conversation_id=conversation.id,
+                role="assistant",
+                content=answer,
+                sources=sources,
+            )
+        )
+        db.commit()
+        return QAResponse(
+            answer=answer,
+            conversation_id=conversation.id,
+            sources=sources,
+            mode="database_update",
+            fallback_reason=None,
+            suggested_questions=["查看观察记录", "继续修改这条记录", "补充这次观察备注"],
+        )
     answer, sources, mode, fallback_reason, suggestions = await answer_question(
         db, payload.question, species.id if species else payload.species_id, payload.job_id, payload.detection_id, user=user
     )
@@ -196,6 +220,193 @@ async def ask(
         mode=mode,
         fallback_reason=fallback_reason,
         suggested_questions=suggestions,
+    )
+
+
+def _record_mutation_intent(text: str) -> bool:
+    return _wants_location_update(text) or _wants_note_update(text) or any(
+        word in text for word in ("登记", "加入观察", "加入生态图谱", "加入图鉴", "记一条", "记录在")
+    )
+
+
+def _wants_location_update(text: str) -> bool:
+    return any(word in text for word in ("位置", "地点", "地址")) and any(
+        word in text for word in ("改为", "修改", "更改", "更新", "设为", "放到")
+    )
+
+
+def _wants_note_update(text: str) -> bool:
+    return any(word in text for word in ("备注", "说明", "笔记")) and any(
+        word in text for word in ("改为", "修改", "更改", "更新", "设为")
+    )
+
+
+async def _handle_record_mutation(
+    db: Session,
+    user: User,
+    payload: QARequest,
+    species: Species | None,
+    location_text: str,
+) -> tuple[str, list[dict]] | None:
+    text = (payload.question or "").strip()
+    if not text:
+        return None
+    wants_location_update = _wants_location_update(text)
+    wants_note_update = _wants_note_update(text)
+    wants_register = any(word in text for word in ("登记", "加入观察", "加入生态图谱", "加入图鉴", "记一条", "记录在"))
+    if not (wants_location_update or wants_note_update or wants_register):
+        return None
+
+    if wants_register and not any(word in text for word in ("修改", "改为", "更改", "更新")):
+        target_species = species or await _resolve_species_from_question(db, text)
+        if not target_species:
+            return (
+                "我需要先确定要登记的物种。请把物种中文名或学名说清楚，例如“将今天看到的银杏登记在天津水上公园”。",
+                [{"kind": "record_mutation", "status": "need_species"}],
+            )
+        location = location_text or _extract_location(text)
+        if not location:
+            return (
+                f"已定位到物种“{target_species.common_name}”，但没有识别到地点。请补充地点后我再写入观察记录。",
+                [{"kind": "record_mutation", "status": "need_location", "species_id": target_species.id}],
+            )
+        record = DiscoveryRecord(
+            user_id=user.id,
+            species_id=target_species.id,
+            record_type="species",
+            title=target_species.common_name,
+            scientific_name=target_species.scientific_name,
+            category=target_species.category,
+            image_url=payload.image_url,
+            confidence=1.0,
+            note=f"来自自然问答登记：{text[:160]}",
+            stars_earned=max(1, min(5, target_species.rarity)),
+        )
+        db.add(record)
+        db.flush()
+        _set_record_location(db, record, location, target_species)
+        _touch_collection(db, user, target_species)
+        return (
+            f"已新增观察记录 #{record.id}：{target_species.common_name}（{target_species.scientific_name}），地点：{location}。这条记录已进入观察记录、自然图鉴和地图统计。",
+            [{"kind": "record_mutation", "action": "create_observation", "record_id": record.id, "location": location}],
+        )
+
+    record_resolution = _resolve_record_for_mutation(db, user, payload, species, text)
+    if isinstance(record_resolution, tuple):
+        records = record_resolution[1]
+        choices = "\n".join(
+            f"{index + 1}. #{record.id} {record.title}，{record.scientific_name or '无学名'}，{record.created_at.strftime('%Y-%m-%d %H:%M')}"
+            for index, record in enumerate(records)
+        )
+        return (
+            f"我找到多条可能要修改的记录，请你明确第几条或记录编号：\n{choices}",
+            [{"kind": "record_mutation", "status": "ambiguous", "record_ids": [record.id for record in records]}],
+        )
+    record = record_resolution
+    if not record:
+        return (
+            "没有找到可修改的观察记录。请说明记录编号、最近一次记录，或先完成一次识别保存。",
+            [{"kind": "record_mutation", "status": "not_found"}],
+        )
+
+    before = _record_snapshot(db, record)
+    changed: list[str] = []
+    location = location_text or _extract_location(text)
+    if wants_location_update and location:
+        _set_record_location(db, record, location, record.species)
+        changed.append(f"地点改为：{location}")
+    note = _extract_note_update(text)
+    if wants_note_update and note:
+        record.note = note
+        changed.append(f"备注改为：{note}")
+    if not changed:
+        return (
+            f"已定位到记录 #{record.id}（{record.title}），但没有识别到新的地点或备注内容，请再说清楚要改成什么。",
+            [{"kind": "record_mutation", "status": "need_new_value", "record_id": record.id}],
+        )
+    record.created_at = now_utc()
+    after = _record_snapshot(db, record)
+    return (
+        f"已修改观察记录 #{record.id}。\n修改前：{before}\n修改后：{after}",
+        [{"kind": "record_mutation", "action": "update_record", "record_id": record.id, "changes": changed}],
+    )
+
+
+def _resolve_record_for_mutation(
+    db: Session,
+    user: User,
+    payload: QARequest,
+    species: Species | None,
+    text: str,
+) -> DiscoveryRecord | tuple[str, list[DiscoveryRecord]] | None:
+    if payload.detection_id:
+        record = db.scalar(
+            select(DiscoveryRecord).where(
+                DiscoveryRecord.user_id == user.id,
+                DiscoveryRecord.detection_id == payload.detection_id,
+            )
+        )
+        if record:
+            return record
+    id_match = re.search(r"(?:#|编号|记录)\s*(\d+)", text)
+    if id_match:
+        record = db.get(DiscoveryRecord, int(id_match.group(1)))
+        if record and record.user_id == user.id:
+            return record
+    ordinal_match = re.search(r"第\s*(\d+)\s*条", text)
+    rows = list(
+        db.scalars(
+            select(DiscoveryRecord)
+            .where(DiscoveryRecord.user_id == user.id)
+            .order_by(DiscoveryRecord.created_at.desc())
+            .limit(8)
+        ).all()
+    )
+    if ordinal_match:
+        index = int(ordinal_match.group(1)) - 1
+        return rows[index] if 0 <= index < len(rows) else None
+    if species:
+        species_rows = [
+            record
+            for record in rows
+            if record.species_id == species.id or record.scientific_name == species.scientific_name
+        ]
+        if len(species_rows) == 1:
+            return species_rows[0]
+        if len(species_rows) > 1:
+            return ("ambiguous", species_rows[:5])
+    return rows[0] if len(rows) == 1 or "最近" in text or "这条" in text else ("ambiguous", rows[:5]) if rows else None
+
+
+def _set_record_location(db: Session, record: DiscoveryRecord, location: str, species: Species | None) -> None:
+    latitude, longitude, city = _coords_for_location(location)
+    privacy = "obscured" if species and species.rarity >= 4 else "precise"
+    row = db.scalar(select(ObservationLocation).where(ObservationLocation.discovery_id == record.id))
+    if not row:
+        row = ObservationLocation(discovery_id=record.id)
+        db.add(row)
+    row.latitude = latitude
+    row.longitude = longitude
+    row.city = city
+    row.district = location[:80]
+    row.location_source = "manual"
+    row.privacy_level = privacy
+    row.observed_at = now_utc()
+
+
+def _extract_note_update(text: str) -> str:
+    match = re.search(r"(?:备注|说明|笔记)\s*(?:改为|修改为|更改为|更新为|设为|:|：)\s*(.+)", text)
+    return match.group(1).strip(" ，。；;")[:1000] if match else ""
+
+
+def _record_snapshot(db: Session, record: DiscoveryRecord) -> str:
+    location = db.scalar(select(ObservationLocation).where(ObservationLocation.discovery_id == record.id))
+    place = ""
+    if location:
+        place = " / ".join(part for part in (location.province, location.city, location.district) if part)
+    return (
+        f"{record.title}；学名：{record.scientific_name or '无'}；地点：{place or '未填写'}；"
+        f"备注：{record.note or '无'}"
     )
 
 

@@ -22,6 +22,7 @@ from backend.models import (
     VideoTrack,
 )
 from backend.services.video_transcode import VideoTranscodeError, probe_video, transcode_browser_video
+from backend.services.taxon_names import localize_candidate, resolve_chinese_name
 from backend.vision.pipeline import process_job
 
 settings = get_settings()
@@ -58,6 +59,17 @@ def _model_metadata(evidence: list) -> dict:
         if isinstance(item, dict) and item.get("kind") == "model_evidence":
             return item
     return {}
+
+
+def _localized_label(db: Session, item: Detection | VideoTrack) -> str:
+    return resolve_chinese_name(db, item.scientific_name, item.label, item.category)
+
+
+def _localized_alternatives(db: Session, alternatives: list) -> list:
+    return [
+        localize_candidate(db, alt) if isinstance(alt, dict) else alt
+        for alt in (alternatives or [])
+    ]
 
 
 @router.post("/upload")
@@ -241,7 +253,7 @@ def get_detections(
             "track_id": item.track_id,
             "species_id": item.species_id,
             "category": item.category,
-            "label": item.label,
+            "label": _localized_label(db, item),
             "scientific_name": item.scientific_name,
             "confidence": item.confidence,
             "timestamp_ms": item.timestamp_ms,
@@ -250,7 +262,7 @@ def get_detections(
             "source": item.source,
             "behavior": item.behavior,
             "phenomenon": item.phenomenon,
-            "alternatives": item.alternatives or [],
+            "alternatives": _localized_alternatives(db, item.alternatives or []),
             "evidence": item.evidence or [],
             "speciesnet_evidence": metadata.get("speciesnet_evidence"),
             "bioclip_evidence": metadata.get("bioclip_evidence"),
@@ -258,7 +270,7 @@ def get_detections(
             "fusion_decision": metadata.get("fusion_decision"),
             "fusion_status": metadata.get("fusion_status"),
             "fusion_reason": metadata.get("fusion_reason"),
-            "bioclip_top_k": metadata.get("bioclip_top_k") or [],
+            "bioclip_top_k": _localized_alternatives(db, metadata.get("bioclip_top_k") or []),
             "bioclip_similarity": metadata.get("bioclip_similarity"),
             "bioclip_top1_margin": metadata.get("bioclip_top1_margin"),
             "prototype_image_count": metadata.get("prototype_image_count"),
@@ -293,14 +305,14 @@ def get_tracks(
                 "track_id": track_id,
                 "species_id": max(items, key=lambda item: item.confidence).species_id,
                 "category": max(items, key=lambda item: item.confidence).category,
-                "label": max(items, key=lambda item: item.confidence).label,
+                "label": _localized_label(db, max(items, key=lambda item: item.confidence)),
                 "scientific_name": max(items, key=lambda item: item.confidence).scientific_name,
                 "confidence": max(item.confidence for item in items),
                 "color": max(items, key=lambda item: item.confidence).color,
                 "start_ms": items[0].timestamp_ms,
                 "end_ms": items[-1].timestamp_ms,
                 "source": "legacy-detections",
-                "alternatives": max(items, key=lambda item: item.confidence).alternatives or [],
+                "alternatives": _localized_alternatives(db, max(items, key=lambda item: item.confidence).alternatives or []),
                 "behavior": max(items, key=lambda item: item.confidence).behavior,
                 "phenomenon": max(items, key=lambda item: item.confidence).phenomenon,
                 "explanation": max(items, key=lambda item: item.confidence).explanation,
@@ -331,14 +343,14 @@ def get_tracks(
                 "track_id": track.track_id,
                 "species_id": track.species_id,
                 "category": track.category,
-                "label": track.label,
+                "label": _localized_label(db, best_detection or track),
                 "scientific_name": track.scientific_name,
                 "confidence": track.confidence,
                 "color": track.color,
                 "start_ms": track.start_ms,
                 "end_ms": track.end_ms,
                 "source": track.source,
-                "alternatives": track.alternatives or [],
+                "alternatives": _localized_alternatives(db, track.alternatives or []),
                 "behavior": best_detection.behavior if best_detection else "",
                 "phenomenon": best_detection.phenomenon if best_detection else "",
                 "explanation": best_detection.explanation if best_detection else "",

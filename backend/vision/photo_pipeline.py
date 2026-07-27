@@ -22,7 +22,7 @@ from backend.models import (
 )
 from backend.services.ai import ark_ai
 from backend.services.species_profile import ensure_species_profile
-from backend.services.taxon_names import localize_prediction
+from backend.services.taxon_names import localize_prediction, normalize_category
 from backend.vision.ai_correction import correction_hint, merge_ai_correction, needs_ai_correction
 from backend.vision.object_detector import LocalObjectDetector
 from backend.vision.onnx_models import LocalNatureModels
@@ -193,6 +193,33 @@ def _is_weak_scene_heuristic(item: Any, hint: str = "") -> bool:
     )
 
 
+def _phenomenon_from_hint(hint: str) -> dict[str, Any] | None:
+    text = str(hint or "").lower()
+    patterns = [
+        (("闪电", "雷电", "雷暴", "lightning", "thunderstorm"), "闪电/雷暴天气", "weather"),
+        (("彩虹", "rainbow"), "彩虹", "weather"),
+        (("雾", "低能见度", "fog", "mist"), "雾/低能见度", "phenomenon"),
+        (("云海", "积雨云", "云", "cloud"), "云层或云系现象", "weather"),
+        (("日落", "晚霞", "朝霞", "sunset", "sunrise"), "霞光/日落光照", "phenomenon"),
+        (("海浪", "浪", "wave"), "海浪", "phenomenon"),
+    ]
+    for tokens, label, category in patterns:
+        if any(token in text for token in tokens):
+            return {
+                "common_name": label,
+                "scientific_name": "",
+                "category": category,
+                "confidence": 0.86,
+                "bbox": {"x": 0.0, "y": 0.0, "width": 1.0, "height": 1.0},
+                "behavior": "",
+                "phenomenon": label,
+                "explanation": "用户提示词明确指向自然现象，系统按全图自然现象候选保存，避免误归入动物或植物。",
+                "evidence": ["用户自然现象提示", "全图场景候选"],
+                "alternatives": [],
+            }
+    return None
+
+
 def _usable_speciesnet_candidate(result: dict[str, Any] | None) -> bool:
     if not result:
         return False
@@ -266,8 +293,23 @@ def _final_model_mode(engines: set[str], fallback: str) -> str:
     return fallback or "heuristic"
 
 
+def _category_allowed(category: str, targets: set[str]) -> bool:
+    category = normalize_category(category)
+    if category in {"person", "vehicle"}:
+        return "people" in targets
+    if category in {"phenomenon", "weather", "fire", "smoke"}:
+        return "phenomena" in targets or "fire" in targets
+    if category in {"plant", "angiosperm", "gymnosperm", "fern", "moss", "algae"}:
+        return "plants" in targets
+    if category in {"fungus", "lichen"}:
+        return "fungi" in targets or "plants" in targets
+    if category in BIOLOGICAL_CATEGORIES or category == "unknown":
+        return "animals" in targets or "plants" in targets or "fungi" in targets
+    return True
+
+
 def _find_species(db: Session, common_name: str, scientific_name: str) -> Species | None:
-    common_name = common_name.strip().removeprefix("疑似").removeprefix("待确认")
+    common_name = common_name.strip().removeprefix("疑似").removeprefix("待确认").removeprefix("低置信度")
     scientific_name = scientific_name.strip()
     if common_name:
         item = db.scalar(select(Species).where(Species.common_name == common_name))
@@ -293,7 +335,7 @@ def _heuristic_objects(image: np.ndarray) -> tuple[str, str, list[dict[str, Any]
     height, width = image.shape[:2]
     hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
     objects: list[dict[str, Any]] = []
-    warnings = ["当前使用离线启发式模式，具体物种与自然现象需要AI或本地训练模型复核。"]
+    warnings = ["当前使用离线启发式模式，具体物种与自然现象需要 AI 或本地训练模型复核。"]
 
     green_mask = cv2.inRange(hsv, np.array([25, 35, 20]), np.array([100, 255, 255]))
     contours, _ = cv2.findContours(green_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
@@ -304,20 +346,19 @@ def _heuristic_objects(image: np.ndarray) -> tuple[str, str, list[dict[str, Any]
             x, y, w, h = cv2.boundingRect(contour)
             objects.append(
                 {
-                    "common_name": "待确认植物",
+                    "common_name": "低置信度植物候选",
                     "scientific_name": "",
                     "category": "plant",
                     "confidence": min(0.68, 0.42 + ratio),
                     "bbox": {"x": x / width, "y": y / height, "width": w / width, "height": h / height},
                     "behavior": "",
                     "phenomenon": "",
-                    "explanation": "画面中存在连续绿色植被区域，但离线模式无法可靠确定具体种类。",
+                    "explanation": "画面中存在连续绿色植被区域，但离线启发式无法可靠确定具体种类。",
                     "evidence": ["连续绿色区域", "植物形态候选"],
                     "alternatives": [],
                 }
             )
 
-    # Fire-like colors are treated as a risk candidate rather than a confirmed phenomenon.
     fire_mask = cv2.inRange(hsv, np.array([0, 145, 145]), np.array([24, 255, 255]))
     fire_ratio = float(np.count_nonzero(fire_mask)) / max(1, height * width)
     if fire_ratio > 0.025:
@@ -361,20 +402,19 @@ def _heuristic_objects(image: np.ndarray) -> tuple[str, str, list[dict[str, Any]
     if not objects:
         objects.append(
             {
-                "common_name": "待确认自然目标",
+                "common_name": "低置信度自然候选",
                 "scientific_name": "",
                 "category": "unknown",
                 "confidence": 0.35,
                 "bbox": {"x": 0.08, "y": 0.08, "width": 0.84, "height": 0.84},
                 "behavior": "",
                 "phenomenon": "",
-                "explanation": "未检测到可由离线规则可靠描述的目标，请启用ARK视觉或下载本地模型。",
+                "explanation": "未检测到可由离线规则可靠描述的目标，请启用 ARK 视觉或下载本地模型。",
                 "evidence": [],
                 "alternatives": [],
             }
         )
     return "自然观察照片", "other", objects[:8], warnings
-
 
 
 async def analyze_photo(
@@ -384,25 +424,27 @@ async def analyze_photo(
     image_bytes: bytes,
     mime_type: str,
     hint: str,
+    enabled_targets: list[str] | None = None,
 ) -> tuple[AnalysisJob, list[Detection], str, str, list[str], str]:
     image = cv2.imdecode(np.frombuffer(image_bytes, np.uint8), cv2.IMREAD_COLOR)
     if image is None:
         raise ValueError("无法解码图片，请使用清晰的 JPG、PNG 或 WebP 文件")
 
+    target_set = set(enabled_targets or ["animals", "plants", "phenomena", "behaviors"])
     job = AnalysisJob(
         owner_id=user.id,
         media_id=media.id,
         status="processing",
         progress=20,
         mode="photo",
-        enabled_targets=["animals", "plants", "phenomena", "behaviors"],
+        enabled_targets=[item for item in ["animals", "plants", "fungi", "phenomena", "behaviors"] if item in target_set],
         summary={},
     )
     db.add(job)
     db.flush()
 
     speciesnet_task = None
-    if speciesnet_client.enabled:
+    if speciesnet_client.enabled and "animals" in target_set:
         speciesnet_task = asyncio.create_task(
             speciesnet_client.safe_predict_image_bytes(
                 image_bytes,
@@ -424,8 +466,15 @@ async def analyze_photo(
     else:
         scene_summary, scene_type, raw_objects, warnings = _heuristic_objects(image)
 
+    hint_phenomenon = _phenomenon_from_hint(hint) if "phenomena" in target_set else None
+    if hint_phenomenon:
+        raw_objects = [hint_phenomenon]
+        scene_summary = str(hint_phenomenon["common_name"])
+        scene_type = "phenomenon"
+        model_mode = _final_model_mode(used_engines, model_mode)
+
     speciesnet_result: dict[str, Any] | None = None
-    if speciesnet_task:
+    if speciesnet_task and not hint_phenomenon:
         speciesnet_payload, speciesnet_error = await speciesnet_task
         if speciesnet_error:
             warnings.append(f"SpeciesNet unavailable; original recognition flow continued: {speciesnet_error}")
@@ -438,7 +487,12 @@ async def analyze_photo(
                     raw_objects = [_speciesnet_raw_object(speciesnet_result), *raw_objects]
                     model_mode = _final_model_mode(used_engines, model_mode)
 
-    if bioclip_classifier.enabled and not _has_biological_candidate(raw_objects):
+    if (
+        bioclip_classifier.enabled
+        and not hint_phenomenon
+        and not _has_biological_candidate(raw_objects)
+        and bool(target_set & {"animals", "plants", "fungi"})
+    ):
         whole_bioclip_result, bioclip_error = bioclip_classifier.safe_predict(
             image,
             category="unknown",
@@ -462,6 +516,11 @@ async def analyze_photo(
 
     if _has_biological_candidate(raw_objects):
         raw_objects = [item for item in raw_objects if not _is_weak_scene_heuristic(item, hint)]
+    raw_objects = [
+        item
+        for item in raw_objects
+        if not isinstance(item, dict) or _category_allowed(str(item.get("category") or "unknown"), target_set)
+    ]
 
     # If ARK did not provide usable boxes, use a local YOLO/MegaDetector-compatible
     # model and let the fine-grained 10k classifier identify every crop.
@@ -477,8 +536,8 @@ async def analyze_photo(
                         "vehicle": "车辆",
                         "fire": "疑似火焰",
                         "smoke": "疑似烟雾",
-                        "plant": "待确认植物",
-                    }.get(region.category, "待确认自然目标"),
+                        "plant": "低置信度植物候选",
+                    }.get(region.category, "低置信度自然候选"),
                     "scientific_name": "",
                     "category": region.category,
                     "confidence": region.confidence,
@@ -496,15 +555,26 @@ async def analyze_photo(
                 }
             )
         if raw_objects:
+            raw_objects = [
+                item
+                for item in raw_objects
+                if not isinstance(item, dict) or _category_allowed(str(item.get("category") or "unknown"), target_set)
+            ]
+        if raw_objects:
             model_mode = "detector"
             warnings.append("当前目标框来自本地检测器，具体物种结果仍需结合分类置信度。")
 
     if not raw_objects:
         scene_summary, scene_type, raw_objects, fallback_warnings = _heuristic_objects(image)
         warnings.extend(fallback_warnings)
+        raw_objects = [
+            item
+            for item in raw_objects
+            if not isinstance(item, dict) or _category_allowed(str(item.get("category") or "unknown"), target_set)
+        ]
         model_mode = "heuristic"
 
-    if local_models.phenomena.available:
+    if "phenomena" in target_set and local_models.phenomena.available:
         prediction = local_models.phenomena.predict(image)
         has_phenomenon = any(
             isinstance(item, dict) and str(item.get("category", "")).lower() in {"phenomenon", "fire", "smoke"}
@@ -520,13 +590,26 @@ async def analyze_photo(
                     "bbox": {"x": 0, "y": 0, "width": 1, "height": 1},
                     "behavior": "",
                     "phenomenon": prediction.label,
-                    "explanation": "本地自然现象ONNX模型对整幅场景进行多类别判断。",
+                    "explanation": "本地自然现象 ONNX 模型对整幅场景进行多类别判断。",
                     "evidence": ["本地训练模型输出"],
                     "alternatives": prediction.alternatives,
                 }
             )
             used_engines.add("onnx")
             model_mode = "ark+onnx" if model_mode == "ark" else "onnx+heuristic"
+
+    if not raw_objects:
+        selected_labels = {
+            "animals": "动物",
+            "plants": "植物",
+            "fungi": "真菌",
+            "phenomena": "自然现象",
+            "behaviors": "动物行为",
+        }
+        warnings.append(
+            "未识别到符合当前选择范围的目标："
+            + "、".join(selected_labels[item] for item in ["animals", "plants", "fungi", "phenomena", "behaviors"] if item in target_set)
+        )
 
     detections: list[Detection] = []
     counts: dict[str, int] = {}
@@ -547,12 +630,12 @@ async def analyze_photo(
         x2 = min(image_width, int((bbox["x"] + bbox["width"]) * image_width))
         y2 = min(image_height, int((bbox["y"] + bbox["height"]) * image_height))
         crop = image[y1:y2, x1:x2]
-        category = str(raw.get("category") or "unknown").lower()
+        category = normalize_category(raw.get("category") or "unknown")
         if category not in CATEGORY_COLORS:
             category = "unknown"
         color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"])
         confidence = _clamp(raw.get("confidence", 0.0))
-        common_name = str(raw.get("common_name") or "待确认自然目标").strip()
+        common_name = str(raw.get("common_name") or "低置信度自然候选").strip()
         scientific_name = str(raw.get("scientific_name") or "").strip()
         alternatives = list(raw.get("alternatives") or [])[:5]
         behavior = str(raw.get("behavior") or "")[:120]
@@ -564,7 +647,7 @@ async def analyze_photo(
                 if matched:
                     common_name = matched.common_name
                     scientific_name = matched.scientific_name
-                    category = matched.category
+                    category = normalize_category(matched.category)
                 elif not scientific_name:
                     scientific_name = local_species.label
                 confidence = max(confidence, local_species.confidence)
@@ -572,14 +655,18 @@ async def analyze_photo(
                 used_engines.add("onnx")
                 model_mode = "ark+onnx" if model_mode == "ark" else "onnx+heuristic"
 
-        if category in {"mammal", "bird", "reptile", "amphibian", "fish", "insect", "arachnid", "mollusk", "crustacean", "invertebrate"}:
+        if "behaviors" in target_set and category in {"mammal", "bird", "reptile", "amphibian", "fish", "insect", "arachnid", "mollusk", "crustacean", "invertebrate"}:
             local_behavior = local_models.behavior.predict(crop)
             if local_behavior and local_behavior.confidence >= 0.60:
                 behavior = local_behavior.label
                 used_engines.add("onnx")
                 model_mode = "ark+onnx" if model_mode == "ark" else "onnx+heuristic"
 
-        if confidence < 0.55 and not common_name.startswith(("疑似", "待确认")):
+        if (
+            confidence < 0.55
+            and not scientific_name
+            and not common_name.startswith(("疑似", "待确认", "低置信度"))
+        ):
             common_name = f"疑似{common_name}"
         existing_result = {
             "common_name": common_name,
@@ -649,12 +736,29 @@ async def analyze_photo(
         fused = fusion.get("result") if isinstance(fusion.get("result"), dict) else None
         if fused:
             fused = localize_prediction(db, fused)
-            if settings.ai_correction_enabled and needs_ai_correction(
+            skip_ai_correction = bool(fused.pop("_skip_ai_correction", False))
+            speciesnet_evidence = fusion.get("speciesnet_evidence") or {}
+            bioclip_evidence = fusion.get("bioclip_evidence") or {}
+            if (
+                not skip_ai_correction
+                and isinstance(speciesnet_evidence, dict)
+                and isinstance(bioclip_evidence, dict)
+                and speciesnet_evidence.get("rank") == "object"
+                and str(bioclip_evidence.get("scientific_name") or "").strip().casefold()
+                == str(fused.get("scientific_name") or "").strip().casefold()
+                and _clamp(fused.get("confidence")) >= settings.ai_correction_min_confidence
+            ):
+                skip_ai_correction = True
+            if (
+                settings.ai_correction_enabled
+                and not skip_ai_correction
+                and needs_ai_correction(
                 result=fused,
                 fusion=fusion,
                 category=str(fused.get("category") or category),
                 min_confidence=settings.ai_correction_min_confidence,
                 statuses=settings.ai_correction_status_set,
+                )
             ):
                 if ark_ai.vision_enabled:
                     correction_bytes = _jpeg_bytes(crop) or image_bytes
@@ -692,7 +796,7 @@ async def analyze_photo(
                     warnings.append("AI correction skipped because ARK_IMAGE_MODEL is not configured.")
             common_name = str(fused.get("common_name") or common_name).strip()
             scientific_name = str(fused.get("scientific_name") or scientific_name).strip()
-            category = str(fused.get("category") or category).lower()
+            category = normalize_category(fused.get("category") or category)
             if category not in CATEGORY_COLORS:
                 category = "unknown"
             confidence = _clamp(fused.get("confidence", confidence))
@@ -743,7 +847,7 @@ async def analyze_photo(
                 species = enriched_species
                 common_name = enriched_species.common_name
                 scientific_name = enriched_species.scientific_name
-                category = enriched_species.category or category
+                category = normalize_category(enriched_species.category or category)
                 color = CATEGORY_COLORS.get(category, CATEGORY_COLORS["unknown"])
                 if not raw.get("explanation") or "BioCLIP" in str(raw.get("explanation")):
                     raw["explanation"] = (
@@ -763,7 +867,7 @@ async def analyze_photo(
             bbox=bbox,
             color=color,
             source=model_mode,
-            review_status="confirmed" if confidence >= 0.8 and species else "pending",
+            review_status="confirmed",
             behavior=behavior,
             phenomenon=str(raw.get("phenomenon") or "")[:120],
             explanation=str(raw.get("explanation") or "")[:3000],

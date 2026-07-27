@@ -117,7 +117,7 @@ class ReviewWindow(QMainWindow):
         item = self.items[row]
         payload = {
             "species_id": item.get("species_id"),
-            "label": self.label.text().strip() or "待确认目标",
+            "label": self.label.text().strip() or "低置信度候选",
             "scientific_name": self.scientific.text().strip(),
             "category": self.category.text().strip() or "unknown",
             "status": status,

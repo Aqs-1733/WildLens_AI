@@ -10,7 +10,7 @@ function Stop-ProcessTree([int]$ProcessId) {
   }
   $process = Get-Process -Id $ProcessId -ErrorAction SilentlyContinue
   if ($process) {
-    Stop-Process -Id $ProcessId -Force
+    Stop-Process -Id $ProcessId -Force -ErrorAction SilentlyContinue
   }
 }
 
@@ -18,7 +18,7 @@ if (-not (Test-Path $PidDir)) {
   Write-Host "No PID directory found."
 }
 
-foreach ($name in @("frontend", "worker", "backend")) {
+foreach ($name in @("frontend", "worker", "backend", "speciesnet_cpu")) {
   $pidFile = Join-Path $PidDir "$name.pid"
   if (-not (Test-Path $pidFile)) {
     Write-Host "$name is not managed."
@@ -42,6 +42,7 @@ $leftovers = Get-CimInstance Win32_Process | Where-Object {
   $_.CommandLine -match $rootPattern -and
   ($_.CommandLine -match 'backend[/\\]main.py' -or
    $_.CommandLine -match 'scripts[/\\]worker.py' -or
+   $_.CommandLine -match 'services[/\\]speciesnet_api[/\\]app.py' -or
    ($_.CommandLine -match 'vite' -and $_.CommandLine -match '5174'))
 }
 foreach ($item in $leftovers) {

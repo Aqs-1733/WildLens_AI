@@ -5,7 +5,78 @@ import { api } from '../api/client'
 import SpeciesAvatar from '../components/SpeciesAvatar'
 import SpeciesModal from '../components/SpeciesModal'
 import type { Species } from '../types'
-const categories=[['','全部'],['mammal','哺乳动物'],['bird','鸟类'],['plant','植物'],['insect','昆虫'],['reptile','爬行动物'],['amphibian','两栖动物']]
-const categoryName=(value:string)=>categories.find(([key])=>key===value)?.[1]||value||'未分类'
-const cleanBrief=(s:Species)=>{const text=(s.traits||s.ecology_value||s.habitat||'').trim();return /本地 BioCLIP|400721|资料生成中|待 AI|原型检索|具体分类单元/.test(text)?'':text}
-export default function SpeciesPage(){const[items,setItems]=useState<Species[]>([]);const[q,setQ]=useState('');const[cat,setCat]=useState('');const[selected,setSelected]=useState<number|null>(null);useEffect(()=>{api<Species[]>('/api/species?mine=true').then(setItems)},[]);const filtered=useMemo(()=>items.filter(i=>(!cat||i.category===cat)&&(!q||`${i.common_name}${i.scientific_name}${i.english_name}`.toLowerCase().includes(q.toLowerCase()))),[items,q,cat]);return <div className="page-stack"><div className="page-intro"><div><span className="eyebrow">NATURE ATLAS</span><h2>自然图鉴</h2><p>识别过、认识过、观察过和问过的动植物都会收进这里；观察事件仍在“观察记录”里单独保存。</p></div><div className="search-box"><Search/><input value={q} onChange={e=>setQ(e.target.value)} placeholder="搜索中文名、学名或英文名"/></div></div><div className="mode-switch"><Link className="active" to="/species"><BookOpen/>物种科普</Link><Link to="/collection"><Sparkles/>物种收藏</Link><Link to="/classroom"><CloudSun/>自然现象与动物行为</Link></div><div className="filter-row"><Filter size={17}/>{categories.map(([value,label])=><button className={cat===value?'active':''} key={value} onClick={()=>setCat(value)}>{label}</button>)}</div><div className="species-grid">{filtered.map(s=>{const brief=cleanBrief(s);return <button className="species-card" key={s.id} onClick={()=>setSelected(s.id)}><div className="species-card-top"><SpeciesAvatar species={s}/><span className="rarity-stars">{'★'.repeat(s.rarity)}{'☆'.repeat(5-s.rarity)}</span></div><h3>{s.common_name}</h3><em>{s.scientific_name}</em>{brief&&<p>{brief}</p>}<div className="species-card-foot"><span style={{color:s.color}}>{categoryName(s.category)}</span><span><ShieldCheck size={14}/>{s.protection_level}</span></div></button>})}</div>{!filtered.length&&<section className="panel empty-state">还没有加入自然图鉴的物种。拍照识别、视频识别或在自然问答中询问具体物种后会自动加入。</section>}{selected&&<SpeciesModal speciesId={selected} onClose={()=>setSelected(null)}/>}</div>}
+import { categoryNameZh, cleanChineseDisplayName, hasChinese, isUncertainName, localTaxonName } from '../utils/taxonNames'
+
+const categories = [
+  ['', '全部'],
+  ['mammal', '哺乳动物'],
+  ['bird', '鸟类'],
+  ['plant', '植物'],
+  ['insect', '昆虫'],
+  ['reptile', '爬行动物'],
+  ['amphibian', '两栖动物'],
+]
+
+function speciesDisplayName(species: Species): string {
+  return cleanChineseDisplayName(
+    localTaxonName({
+      label: species.common_name,
+      scientificName: species.scientific_name,
+      category: species.category,
+      fallback: species.common_name,
+    }),
+    species.common_name,
+  )
+}
+
+function cleanBrief(species: Species): string {
+  const text = (species.traits || species.ecology_value || species.habitat || '').trim()
+  return /本地 BioCLIP|400721|资料生成中|待 AI|原型检索|具体分类单元|低置信度|候选/.test(text) ? '' : text
+}
+
+function validSpeciesCard(species: Species): boolean {
+  const name = speciesDisplayName(species)
+  return hasChinese(name) && !isUncertainName(name) && !isUncertainName(species.common_name)
+}
+
+export default function SpeciesPage() {
+  const [items, setItems] = useState<Species[]>([])
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('')
+  const [selected, setSelected] = useState<number | null>(null)
+
+  useEffect(() => { api<Species[]>('/api/species?mine=true').then(setItems) }, [])
+
+  const filtered = useMemo(() => items.filter((item) => {
+    const name = speciesDisplayName(item)
+    const haystack = `${name}${item.common_name}${item.scientific_name}${item.english_name}`.toLowerCase()
+    return validSpeciesCard(item) && (!category || item.category === category) && (!query || haystack.includes(query.toLowerCase()))
+  }), [items, query, category])
+
+  return (
+    <div className="page-stack">
+      <div className="page-intro">
+        <div><span className="eyebrow">NATURE ATLAS</span><h2>自然图鉴</h2></div>
+        <div className="search-box"><Search /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索中文名或学名" /></div>
+      </div>
+      <div className="mode-switch"><Link className="active" to="/species"><BookOpen />物种科普</Link><Link to="/collection"><Sparkles />物种收藏</Link><Link to="/classroom"><CloudSun />自然现象</Link></div>
+      <div className="filter-row"><Filter size={17} />{categories.map(([value, label]) => <button className={category === value ? 'active' : ''} key={value} onClick={() => setCategory(value)}>{label}</button>)}</div>
+      <div className="species-grid">
+        {filtered.map((species) => {
+          const brief = cleanBrief(species)
+          const name = speciesDisplayName(species)
+          return (
+            <button className="species-card" key={species.id} onClick={() => setSelected(species.id)}>
+              <div className="species-card-top"><SpeciesAvatar species={species} /><span className="rarity-stars">{'★'.repeat(species.rarity)}{'☆'.repeat(5 - species.rarity)}</span></div>
+              <h3>{name}</h3>
+              {brief && <p>{brief}</p>}
+              <div className="species-card-foot"><span style={{ color: species.color }}>{categoryNameZh(species.category)}</span><span><ShieldCheck size={14} />{species.protection_level}</span></div>
+            </button>
+          )
+        })}
+      </div>
+      {!filtered.length && <section className="panel empty-state">还没有可展示的中文图鉴条目。拍照识别、视频识别或在自然问答中确认具体物种后会自动加入。</section>}
+      {selected && <SpeciesModal speciesId={selected} onClose={() => setSelected(null)} />}
+    </div>
+  )
+}

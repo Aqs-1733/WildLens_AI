@@ -59,3 +59,22 @@ def test_ai_correction_must_clear_threshold_and_local_confidence():
     assert corrected["scientific_name"] == "Panthera tigris"
     assert corrected["model_source"] == "speciesnet+bioclip+ai-correction"
     assert corrected["ai_correction_status"] == "accepted"
+
+
+def test_ai_correction_cannot_replace_specific_species_with_generic_candidate():
+    local = {
+        "common_name": "夜鹭",
+        "scientific_name": "Nycticorax nycticorax",
+        "category": "bird",
+        "confidence": 0.76,
+        "model_source": "bioclip+speciesnet-detector",
+    }
+    generic_ai = {"common_name": "动物候选", "scientific_name": "", "category": "bird", "confidence": 0.96}
+    corrected = merge_ai_correction(
+        local_result=local,
+        ai_result=generic_ai,
+        min_accept_confidence=0.72,
+    )
+    assert corrected["common_name"] == "夜鹭"
+    assert corrected["scientific_name"] == "Nycticorax nycticorax"
+    assert corrected["ai_correction_status"] == "not_accepted"

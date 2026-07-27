@@ -5,7 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core.database import get_db
-from backend.deps import require_regulator
+from backend.deps import get_current_user, require_regulator
 from backend.models import RiskEvent, User
 from backend.schemas import ReviewEventRequest
 
@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 @router.get("")
 def list_alerts(
-    db: Session = Depends(get_db), _: User = Depends(require_regulator)
+    db: Session = Depends(get_db), _: User = Depends(get_current_user)
 ) -> list[dict]:
     items = db.scalars(select(RiskEvent).order_by(RiskEvent.created_at.desc())).all()
     return [

@@ -172,7 +172,15 @@ def test_regulator_permissions_review_and_datasets(
     public_headers: dict[str, str],
     regulator_headers: dict[str, str],
 ):
-    assert client.get("/api/alerts", headers=public_headers).status_code == 403
+    public_alerts = client.get("/api/alerts", headers=public_headers)
+    assert public_alerts.status_code == 200
+    assert public_alerts.json()
+    public_review = client.patch(
+        f"/api/alerts/{public_alerts.json()[0]['id']}",
+        headers=public_headers,
+        json={"status": "confirmed", "note": "pytest公众账号不能复核"},
+    )
+    assert public_review.status_code == 403
 
     alerts = client.get("/api/alerts", headers=regulator_headers)
     assert alerts.status_code == 200
@@ -220,7 +228,7 @@ def test_photo_identification_history_feedback_and_share(
         "/api/identify/photo",
         headers=public_headers,
         files={"file": ("leaf.png", buffer.getvalue(), "image/png")},
-        data={"hint": "公园植物近景"},
+        data={"hint": "公园植物近景", "scopes": "plants"},
     )
     assert response.status_code == 200, response.text
     body = response.json()
@@ -269,6 +277,20 @@ def test_photo_identification_history_feedback_and_share(
         },
     )
     assert saved.status_code == 200, saved.text
+    saved_record = saved.json()
+
+    mutation = client.post(
+        "/api/qa/ask",
+        headers=public_headers,
+        json={
+            "question": f"把记录 #{saved_record['id']} 的地点改为天津水上公园",
+            "species_id": saved_record["species_id"],
+        },
+    )
+    assert mutation.status_code == 200, mutation.text
+    assert mutation.json()["mode"] == "database_update"
+    assert "修改前" in mutation.json()["answer"]
+    assert "修改后" in mutation.json()["answer"]
 
     history = client.get("/api/identify/history", headers=public_headers)
     assert history.status_code == 200
@@ -280,6 +302,23 @@ def test_photo_identification_history_feedback_and_share(
     map_rows = client.get("/api/identify/observations/map?layer=plant", headers=public_headers)
     assert map_rows.status_code == 200
     assert map_rows.json()
+    assert any(item["city"] == "天津" for item in map_rows.json())
+
+    tasks = client.get("/api/species/learning/tasks", headers=public_headers)
+    assert tasks.status_code == 200
+    claimable_task = next(item for item in tasks.json() if item["completed"] and not item["claimed"])
+    task_claim = client.post(f"/api/species/learning/tasks/{claimable_task['id']}/claim", headers=public_headers)
+    assert task_claim.status_code == 200, task_claim.text
+    duplicate_task_claim = client.post(f"/api/species/learning/tasks/{claimable_task['id']}/claim", headers=public_headers)
+    assert duplicate_task_claim.status_code == 409
+
+    badges = client.get("/api/species/learning/badges", headers=public_headers)
+    assert badges.status_code == 200
+    claimable_badge = next(item for item in badges.json() if item["earned"] and not item["claimed"])
+    badge_claim = client.post(f"/api/species/learning/badges/{claimable_badge['id']}/claim", headers=public_headers)
+    assert badge_claim.status_code == 200, badge_claim.text
+    duplicate_badge_claim = client.post(f"/api/species/learning/badges/{claimable_badge['id']}/claim", headers=public_headers)
+    assert duplicate_badge_claim.status_code == 409
 
     post = client.post(
         "/api/social/posts",

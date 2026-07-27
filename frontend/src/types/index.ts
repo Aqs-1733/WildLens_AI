@@ -137,6 +137,7 @@ export interface PhotoObject {
   track_id: number
   category: string
   label: string
+  common_name_zh?: string
   scientific_name: string
   confidence: number
   bbox: { x: number; y: number; width: number; height: number }

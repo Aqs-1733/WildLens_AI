@@ -248,6 +248,20 @@ class UserTaskProgress(Base):
     task: Mapped[LearningTask] = relationship(lazy="joined")
 
 
+class UserBadgeClaim(Base):
+    __tablename__ = "user_badge_claims"
+    __table_args__ = (UniqueConstraint("user_id", "badge_id", name="uq_user_badge_claim"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    badge_id: Mapped[int] = mapped_column(Integer, index=True)
+    name: Mapped[str] = mapped_column(String(150))
+    category: Mapped[str] = mapped_column(String(50), default="")
+    reward_points: Mapped[int] = mapped_column(Integer, default=0)
+    reward_stars: Mapped[int] = mapped_column(Integer, default=0)
+    claimed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now_utc)
+
+
 class MediaFile(Base):
     __tablename__ = "media_files"
 
@@ -283,7 +297,7 @@ class VideoTrack(Base):
     track_id: Mapped[int] = mapped_column(Integer, index=True)
     species_id: Mapped[int | None] = mapped_column(ForeignKey("species.id"), nullable=True)
     category: Mapped[str] = mapped_column(String(60), default="unknown")
-    label: Mapped[str] = mapped_column(String(180), default="待确认目标")
+    label: Mapped[str] = mapped_column(String(180), default="低置信度候选")
     scientific_name: Mapped[str] = mapped_column(String(180), default="")
     confidence: Mapped[float] = mapped_column(Float, default=0.0)
     color: Mapped[str] = mapped_column(String(20), default="#8CA9A0")

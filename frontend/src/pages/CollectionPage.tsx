@@ -5,6 +5,7 @@ import { api } from '../api/client'
 import SpeciesAvatar from '../components/SpeciesAvatar'
 import SpeciesModal from '../components/SpeciesModal'
 import type { CollectionItem } from '../types'
+import { cleanChineseDisplayName, hasChinese, isUncertainName, localTaxonName } from '../utils/taxonNames'
 
 type ObservationSummary = {
   species_id: number | null
@@ -29,8 +30,18 @@ export default function CollectionPage() {
 
   useEffect(() => { void load() }, [])
 
+  const displayName = (item: CollectionItem) => cleanChineseDisplayName(localTaxonName({
+    label: item.species.common_name,
+    scientificName: item.species.scientific_name,
+    category: item.species.category,
+    fallback: item.species.common_name,
+  }), item.species.common_name)
   const cards = useMemo(
-    () => collection.filter((item) => !query || `${item.species.common_name}${item.species.scientific_name}`.toLowerCase().includes(query.toLowerCase())),
+    () => collection.filter((item) => {
+      const name = displayName(item)
+      const haystack = `${name}${item.species.common_name}${item.species.scientific_name}`.toLowerCase()
+      return hasChinese(name) && !isUncertainName(name) && !isUncertainName(item.species.common_name) && (!query || haystack.includes(query.toLowerCase()))
+    }),
     [collection, query],
   )
   const stars = collection.reduce((total, item) => total + item.stars_earned, 0)
@@ -64,7 +75,7 @@ export default function CollectionPage() {
           <div><Star /><strong>{stars}</strong><span>生态星</span></div>
         </div>
       </div>
-      <div className="mode-switch"><Link to="/species"><BookOpen/>物种百科</Link><Link className="active" to="/collection"><Sparkles/>我的收藏</Link><Link to="/classroom"><CloudSun/>现象与行为</Link></div>
+      <div className="mode-switch"><Link to="/species"><BookOpen/>物种百科</Link><Link className="active" to="/collection"><Sparkles/>我的收藏</Link><Link to="/classroom"><CloudSun/>自然现象</Link></div>
 
       <div className="reward-strip">
         <div className="reward-level"><CalendarDays /><div><strong>每一次重复发现都会保留</strong><span>系统分别统计首次发现、最近发现、总次数和不同地点。</span></div></div>
@@ -93,7 +104,7 @@ export default function CollectionPage() {
                   <button className={`favorite-btn ${item.favorite ? 'active' : ''}`} onClick={(event) => { event.stopPropagation(); void favorite(item.species_id) }}><Heart /></button>
                 </div>
                 <div className="album-card-body">
-                  <div><h3>{item.species.common_name}</h3><em>{item.species.scientific_name}</em></div>
+                  <div><h3>{displayName(item)}</h3></div>
                   <div className="album-meta"><span>发现 {summary?.count ?? item.discovered_count} 次</span><span>{'★'.repeat(Math.max(1, item.stars_earned))}</span></div>
                   {summary && <p className="unlock-hint">首次：{new Date(summary.first_discovered_at).toLocaleDateString()} · 最近：{new Date(summary.last_discovered_at).toLocaleDateString()}</p>}
                 </div>

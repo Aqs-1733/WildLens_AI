@@ -285,7 +285,7 @@ def create_review(
     detection_id = int(payload.get("detection_id") or payload.get("id") or 0)
     request = DetectionReviewRequest(
         species_id=payload.get("species_id"),
-        label=str(payload.get("label") or "待确认目标"),
+        label=str(payload.get("label") or "低置信度候选"),
         scientific_name=str(payload.get("scientific_name") or ""),
         category=str(payload.get("category") or "unknown"),
         status=str(payload.get("status") or "confirmed"),

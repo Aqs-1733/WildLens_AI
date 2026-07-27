@@ -25,6 +25,7 @@ from backend.models import (
     now_utc,
 )
 from backend.services.ai import ark_ai
+from backend.services.taxon_names import normalize_category
 from backend.services.video_transcode import (
     VideoTranscodeError,
     transcode_browser_video,
@@ -35,7 +36,7 @@ from backend.vision.bioclip_classifier import BIOLOGICAL_CATEGORIES, bioclip_cla
 from backend.vision.learning_feedback import learn_labeled_image
 from backend.vision.object_detector import LocalObjectDetector
 from backend.vision.onnx_models import LocalNatureModels
-from backend.vision.species_fusion import fuse_species_results, speciesnet_bbox_to_dict
+from backend.vision.species_fusion import fuse_species_results, speciesnet_bbox_to_dict, speciesnet_category
 from backend.vision.speciesnet_client import speciesnet_client
 
 settings = get_settings()
@@ -56,6 +57,61 @@ local_models = LocalNatureModels(
     _resolve_model_path(settings.behavior_model_path),
     _resolve_model_path(settings.phenomena_model_path),
 )
+
+
+def _vision_mode_label() -> str:
+    parts = ["local-detector" if local_detector.available else "opencv"]
+    if local_models.species.available:
+        parts.append("onnx-species")
+    if speciesnet_client.enabled:
+        parts.append("speciesnet")
+    if bioclip_classifier.enabled:
+        parts.append("bioclip")
+    if ark_ai.vision_enabled:
+        parts.append("ark")
+    return "+".join(parts)
+
+
+ANIMAL_VIDEO_CATEGORIES = {
+    "unknown",
+    "mammal",
+    "bird",
+    "reptile",
+    "amphibian",
+    "fish",
+    "insect",
+    "arachnid",
+    "mollusk",
+    "crustacean",
+    "invertebrate",
+}
+
+
+def _downgrade_unreliable_video_species(
+    *,
+    fused: dict[str, Any],
+    fusion: dict[str, Any],
+    speciesnet_result: dict[str, Any] | None,
+    candidate_category: str,
+) -> dict[str, Any]:
+    scientific_name = str(fused.get("scientific_name") or "").strip()
+    if not scientific_name:
+        return fused
+    fusion_status = str(fusion.get("fusion_status") or fusion.get("decision") or "").lower()
+    if fusion_status not in {"review", "unknown"}:
+        return fused
+    annotated = dict(fused)
+    annotated["fusion_status"] = "review"
+    annotated["fusion_decision"] = "review"
+    annotated["fusion_reason"] = (
+        annotated.get("fusion_reason")
+        or "视频帧证据不足或模型候选存在冲突，保留具体候选并提示人工复核。"
+    )
+    annotated["explanation"] = (
+        annotated.get("explanation")
+        or "视频帧存在运动模糊、遮挡或候选冲突；系统保留当前具体候选，建议结合关键帧、地点和相邻帧确认。"
+    )
+    return annotated
 
 CATEGORY_COLORS = {
     "mammal": "#F5A623",
@@ -263,6 +319,27 @@ def _find_species(db, result: dict[str, Any]) -> Species | None:
     return None
 
 
+def _counts_as_species(common_name: str, scientific_name: str) -> bool:
+    normalized_scientific = scientific_name.strip().lower()
+    if "no cv" in normalized_scientific or normalized_scientific in {"unknown", "animal"}:
+        return False
+    if normalized_scientific:
+        return True
+    normalized = common_name.strip().lower()
+    if not normalized:
+        return False
+    unresolved_prefixes = ("低置信度", "待确认", "疑似")
+    unresolved_values = {
+        "animal",
+        "unknown",
+        "no cv",
+        "no cv result",
+        "低置信度候选",
+        "低置信度动物候选",
+    }
+    return not normalized.startswith(unresolved_prefixes) and normalized not in unresolved_values
+
+
 def _model_evidence_item(
     fusion: dict[str, Any], detections: list[dict[str, Any]]
 ) -> dict[str, Any]:
@@ -436,7 +513,7 @@ async def process_job(job_id: int) -> None:
         frame_index = 0
         tracker = SimpleIoUTracker()
         ai_calls = 0
-        max_ai_calls = 10 if job.mode == "precise" else 5
+        max_ai_calls = max(0, int(getattr(settings, "video_ai_max_calls", 1) or 0))
         seen_hashes: set[str] = set()
         category_counts: dict[str, int] = {}
         species_counts: dict[str, int] = {}
@@ -488,7 +565,7 @@ async def process_job(job_id: int) -> None:
 
             # Fallback candidates keep the project usable before a detector weight is installed.
             if not detector_regions:
-                if "plants" in job.enabled_targets:
+                if "plants" in job.enabled_targets and "animals" not in job.enabled_targets:
                     candidates.extend(_plant_candidates(frame))
                 if "animals" in job.enabled_targets or "people" in job.enabled_targets:
                     candidates.extend(_motion_candidates(frame, subtractor))
@@ -599,7 +676,7 @@ async def process_job(job_id: int) -> None:
                         "confidence": local_species.confidence,
                         "alternatives": local_species.alternatives,
                         "taxonomy": local_species.taxonomy,
-                        "evidence": ["本地一万类ONNX物种模型"],
+                        "evidence": ["本地一万类 ONNX 物种模型"],
                         "explanation": (
                             "本地细粒度物种模型完成初步识别，"
                             "低置信度结果会保持为候选而非强制定种。"
@@ -609,16 +686,16 @@ async def process_job(job_id: int) -> None:
                     local_species_used += 1
                 elif local_species:
                     result = {
-                        "common_name": "待确认植物"
+                        "common_name": "低置信度植物候选"
                         if candidate.category == "plant"
-                        else "待确认目标",
+                        else "低置信度候选",
                         "scientific_name": "",
                         "category": candidate.category,
                         "confidence": max(candidate.score, local_species.confidence),
                         "alternatives": local_species.alternatives,
                         "taxonomy": local_species.taxonomy,
                         "evidence": ["本地模型判定为开放集未知或置信度不足"],
-                        "explanation": "模型未达到可靠定种阈值，保留Top-5候选供人工复核。",
+                        "explanation": "模型未达到可靠定种阈值，保留 Top-5 候选供人工复核。",
                         "model_source": "onnx-unknown",
                     }
 
@@ -648,24 +725,24 @@ async def process_job(job_id: int) -> None:
                         "vehicle": "车辆",
                         "fire": "疑似火焰",
                         "smoke": "疑似烟雾",
-                        "plant": "待确认植物",
+                        "plant": "低置信度植物候选",
                     }
                     result = {
                         "common_name": coarse_names.get(
-                            candidate.category, candidate.coarse_label or "待确认目标"
+                            candidate.category, candidate.coarse_label or "低置信度候选"
                         ),
                         "scientific_name": "",
                         "category": candidate.category,
                         "confidence": candidate.score,
                         "alternatives": [],
                         "model_source": "local-detector" if local_detector.available else "opencv",
-                        "evidence": [f"粗检测类别：{candidate.coarse_label}"]
+                            "evidence": [f"粗检测类别：{candidate.coarse_label}"]
                         if candidate.coarse_label
                         else [],
                     }
 
                 bioclip_result: dict[str, Any] | None = None
-                if bioclip_classifier.enabled and candidate.category in BIOLOGICAL_CATEGORIES:
+                if bioclip_classifier.enabled and candidate.category in ANIMAL_VIDEO_CATEGORIES:
                     if crop_hash and crop_hash in bioclip_cache:
                         bioclip_result = bioclip_cache[crop_hash]
                     else:
@@ -696,14 +773,28 @@ async def process_job(job_id: int) -> None:
                 )
                 fused = fusion.get("result") if isinstance(fusion.get("result"), dict) else None
                 if fused:
-                    if settings.ai_correction_enabled and needs_ai_correction(
-                        result=fused,
+                    fused = _downgrade_unreliable_video_species(
+                        fused=fused,
                         fusion=fusion,
-                        category=str(fused.get("category") or candidate.category),
-                        min_confidence=settings.ai_correction_min_confidence,
-                        statuses=settings.ai_correction_status_set,
+                        speciesnet_result=speciesnet_result,
+                        candidate_category=candidate.category,
+                    )
+                    skip_ai_correction = bool(fused.pop("_skip_ai_correction", False))
+                    if (
+                        not skip_ai_correction
+                        and settings.ai_correction_enabled
+                        and ai_calls < max_ai_calls
+                        and crop_hash not in seen_hashes
+                        and needs_ai_correction(
+                            result=fused,
+                            fusion=fusion,
+                            category=str(fused.get("category") or candidate.category),
+                            min_confidence=settings.ai_correction_min_confidence,
+                            statuses=settings.ai_correction_status_set,
+                        )
                     ):
                         if ark_ai.vision_enabled and crop_bytes:
+                            seen_hashes.add(crop_hash)
                             ai_corrected = await ark_ai.classify_image(
                                 crop_bytes,
                                 hint=correction_hint(
@@ -742,6 +833,7 @@ async def process_job(job_id: int) -> None:
                                 ai_correction_warnings.add(
                                     "AI correction was requested but returned no usable result."
                                 )
+                            ai_calls += 1
                         elif ark_ai.vision_enabled:
                             ai_correction_warnings.add(
                                 "AI correction skipped because no crop bytes were available."
@@ -760,11 +852,11 @@ async def process_job(job_id: int) -> None:
                     if fusion.get("warnings"):
                         speciesnet_warnings.update(str(item) for item in fusion["warnings"])
 
-                category = str(result.get("category") or candidate.category or "unknown").lower()
+                category = normalize_category(result.get("category") or candidate.category or "unknown")
                 if category == "unknown" and candidate.category == "plant":
                     category = "plant"
                 confidence = float(result.get("confidence") or candidate.score)
-                common_name = str(result.get("common_name") or "待确认目标")
+                common_name = str(result.get("common_name") or "低置信度候选")
                 scientific_name = str(result.get("scientific_name") or "")
                 alternatives = list(result.get("alternatives") or [])[:5]
                 behavior = str(result.get("behavior") or "")[:120]
@@ -797,8 +889,12 @@ async def process_job(job_id: int) -> None:
                 if species:
                     common_name = species.common_name
                     scientific_name = species.scientific_name
-                    category = species.category
-                if confidence < 0.55 and not common_name.startswith(("疑似", "待确认")):
+                    category = normalize_category(species.category)
+                if (
+                    confidence < 0.55
+                    and not scientific_name
+                    and not common_name.startswith(("疑似", "待确认", "低置信度"))
+                ):
                     common_name = f"疑似{common_name}"
                 track_id = tracker.assign(candidate.bbox, timestamp_ms)
                 normalized = _normalized_bbox(x, y, width, height, frame_width, frame_height)
@@ -866,7 +962,8 @@ async def process_job(job_id: int) -> None:
                     )
                     saved_keyframes.add(keyframe_key)
                 category_counts[category] = category_counts.get(category, 0) + 1
-                species_counts[common_name] = species_counts.get(common_name, 0) + 1
+                if _counts_as_species(common_name, scientific_name):
+                    species_counts[common_name] = species_counts.get(common_name, 0) + 1
 
             if "fire" in job.enabled_targets:
                 job.status = JobStatus.RISK_ANALYSIS.value
@@ -889,7 +986,7 @@ async def process_job(job_id: int) -> None:
                                 description="颜色与亮度初筛发现疑似火焰区域，需要人工复核。",
                                 timestamp_ms=timestamp_ms,
                                 confidence=score,
-                                evidence={"method": "HSV颜色与面积初筛"},
+                                evidence={"method": "HSV 颜色与面积初筛"},
                                 ai_advice="优先查看事件前后连续画面，确认后再联系专业人员。",
                             )
                         )
@@ -917,23 +1014,7 @@ async def process_job(job_id: int) -> None:
             "playback_url": f"/media/playback/{playback_path.name}",
             "annotated_url": annotated_url,
             "video_codec": "h264",
-            "vision_mode": (
-                "本地检测器 + 一万类ONNX + ARK复核"
-                if local_detector.available
-                and local_models.species.available
-                and ark_ai.vision_enabled
-                else "本地检测器 + 一万类ONNX"
-                if local_detector.available and local_models.species.available
-                else "本地一万类ONNX + ARK复核 + OpenCV候选区域"
-                if local_models.species.available and ark_ai.vision_enabled
-                else "本地一万类ONNX + OpenCV候选区域"
-                if local_models.species.available
-                else "本地检测器 + ARK复核"
-                if local_detector.available and ark_ai.vision_enabled
-                else "ARK多模态分类 + OpenCV候选区域"
-                if ark_ai.vision_enabled
-                else "OpenCV本地初筛"
-            ),
+            "vision_mode": _vision_mode_label(),
             "speciesnet_predictions": speciesnet_used,
             "speciesnet_enabled": speciesnet_client.enabled,
             "speciesnet_warnings": sorted(speciesnet_warnings),
@@ -948,10 +1029,10 @@ async def process_job(job_id: int) -> None:
             "local_behavior_predictions": local_behavior_used,
             "fire_peak": round(fire_peak, 3),
             "limitations": [
-                "个人图鉴仅在用户确认识别后写入，不会因模型预测自动点亮",
-                "植物仅对明显前景或近景区域进行候选检测",
-                "低置信度结果必须人工复核",
-                "未安装一万类自训练模型时不宣称覆盖全部物种",
+                "个人图鉴只在用户确认识别后写入，不会因为模型预测自动点亮。",
+                "植物只对明显前景或近景区域进行候选检测。",
+                "低置信度结果必须人工复核。",
+                "未安装一万类自训练模型时，不宣称覆盖全部物种。",
             ],
         }
         job.progress = 100

@@ -47,12 +47,13 @@ class Settings(BaseSettings):
     ark_api_key: str = ""
     ark_openai_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
     ark_dns_fallback_ip: str = ""
-    ark_model: str = "doubao-seed-2-0-lite-260428"
+    ark_model: str = "doubao-seed-evolving"
     ark_image_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
-    ark_image_model: str = "doubao-seed-2-0-lite-260428"
+    ark_image_model: str = "doubao-seed-evolving"
     ai_correction_enabled: bool = True
-    ai_correction_min_confidence: float = 0.72
-    ai_correction_statuses: str = "review,unknown,fallback,probable"
+    ai_correction_min_confidence: float = 0.62
+    ai_correction_statuses: str = "unknown,fallback"
+    video_ai_max_calls: int = 1
 
     langchain_tracing_v2: bool = False
     langchain_api_key: str = ""

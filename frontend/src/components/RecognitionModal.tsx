@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { api } from '../api/client'
 import type { DiscoveryRecord, PhotoObject, SpeciesGuide } from '../types'
+import { cleanChineseDisplayName, localTaxonName } from '../utils/taxonNames'
 
 type LocationPayload = {
   latitude?: number
@@ -42,11 +43,16 @@ async function requestLocation(): Promise<LocationPayload> {
 }
 
 function evidenceText(item: unknown): string {
-  if (typeof item === 'string') return item
+  if (typeof item === 'string') {
+    if (/SpeciesNet classifier/i.test(item)) return 'SpeciesNet 目标检测/分类候选'
+    if (/both produced evidence but disagree/i.test(item)) return 'SpeciesNet 与 BioCLIP 结果不一致，建议复核'
+    if (/BioCLIP matched/i.test(item)) return 'BioCLIP 本地原型库命中'
+    return item
+  }
   if (!item || typeof item !== 'object') return '结构化模型证据'
   const value = item as Record<string, unknown>
   if (typeof value.fusion_reason === 'string') return value.fusion_reason
-  if (typeof value.kind === 'string') return value.kind
+  if (typeof value.kind === 'string') return value.kind === 'model_evidence' ? '本地双引擎证据' : value.kind
   return '结构化模型证据'
 }
 
@@ -74,7 +80,11 @@ export default function RecognitionModal({
   const [feedbackLoading, setFeedbackLoading] = useState(false)
   const [savedRecord, setSavedRecord] = useState<DiscoveryRecord | null>(null)
   const [saving, setSaving] = useState(false)
-  const [shareText, setShareText] = useState(`我用识境识别到了${object.label}，一起来看看这次自然发现吧！`)
+  const [shareText, setShareText] = useState(`我用识境识别到了${localTaxonName({
+    label: object.common_name_zh || object.label,
+    scientificName: object.scientific_name,
+    category: object.category,
+  })}，一起来看看这次自然发现！`)
   const [shared, setShared] = useState(false)
   const [guide, setGuide] = useState<SpeciesGuide | null>(null)
   const [guideLoading, setGuideLoading] = useState(true)
@@ -87,12 +97,17 @@ export default function RecognitionModal({
 
   useEffect(() => {
     let active = true
+    const initialName = localTaxonName({
+      label: object.common_name_zh || object.label,
+      scientificName: object.scientific_name,
+      category: object.category,
+    })
     setGuide(null)
     setGuideError('')
     setGuideLoading(true)
     setCorrectionOpen(false)
     setFeedbackSent(false)
-    setCorrectedLabel(object.label)
+    setCorrectedLabel(initialName)
     setCorrectedScientific(object.scientific_name)
     api<SpeciesGuide>(`/api/identify/detections/${object.id}/guide`)
       .then((data) => {
@@ -100,7 +115,7 @@ export default function RecognitionModal({
         setGuide(data)
         setCorrectedLabel(data.common_name_zh || data.label || object.label)
         setCorrectedScientific(data.scientific_name || object.scientific_name)
-        setShareText(`我用识境识别到了${data.common_name_zh || data.label || object.label}，一起来看看这次自然发现吧！`)
+        setShareText(`我用识境识别到了${data.common_name_zh || data.label || object.label}，一起来看看这次自然发现！`)
       })
       .catch((err: Error) => {
         if (active) setGuideError(err.message || '中文科普加载失败')
@@ -113,8 +128,11 @@ export default function RecognitionModal({
     }
   }, [object.id, object.label, object.scientific_name])
 
-  const title = object.phenomenon || object.behavior || guide?.common_name_zh || guide?.label || object.label
-  const scientificName = guide?.scientific_name || object.scientific_name
+  const title = cleanChineseDisplayName(object.phenomenon || object.behavior || guide?.common_name_zh || guide?.label || localTaxonName({
+    label: object.common_name_zh || object.label,
+    scientificName: object.scientific_name,
+    category: object.category,
+  }), object.label)
   const alternatives: Array<{ name: string; scientific_name?: string; confidence?: number; common_name_zh?: string; display_name?: string }> =
     guide?.localized_alternatives?.length ? guide.localized_alternatives : object.alternatives
   const typeLabel = useMemo(() => {
@@ -131,7 +149,7 @@ export default function RecognitionModal({
     setQuestion('')
     setLoading(true)
     try {
-      const result = await api<{ answer: string; conversation_id: number; mode: string; fallback_reason?: string | null }>(`/api/qa/ask`, {
+      const result = await api<{ answer: string; conversation_id: number; mode: string; fallback_reason?: string | null }>('/api/qa/ask', {
         method: 'POST',
         body: JSON.stringify({
           question: text,
@@ -238,7 +256,6 @@ export default function RecognitionModal({
           <div className="recognition-badge" style={{ borderColor: object.color, color: object.color }}>{typeLabel}</div>
           <div>
             <h2>{title}</h2>
-            <em>{scientificName || '学名待确认'}</em>
             <p>置信度 {(object.confidence * 100).toFixed(1)}%</p>
           </div>
           <div className="confidence-orb" style={{ '--confidence': `${object.confidence * 100}%`, '--tone': object.color } as React.CSSProperties}>
@@ -257,7 +274,7 @@ export default function RecognitionModal({
             <div className="recognition-explain">
               <article className="recognition-wide">
                 <span>物种科普</span>
-                <p>{guideLoading ? '正在生成中文科普…' : guideError || guide?.summary || '暂无中文科普，建议先确认具体物种。'}</p>
+                <p>{guideLoading ? '正在生成中文科普...' : guideError || guide?.summary || '暂无中文科普，建议先确认具体物种。'}</p>
               </article>
               {guide && (
                 <>
@@ -271,7 +288,10 @@ export default function RecognitionModal({
               <article><span>模型解释</span><p>{object.explanation || '暂无详细解释，建议补充更多角度照片。'}</p></article>
               <article><span>可见依据</span><div className="evidence-list">{evidenceItems.map((item, index) => <b key={`${item}-${index}`}><CheckCircle2 />{item}</b>)}</div></article>
               {alternatives.length > 0 && (
-                <article className="recognition-wide"><span>Top 候选与相似物种</span><div className="alternative-list">{alternatives.map((item, index) => <div key={`${item.name}-${index}`}><strong>{item.common_name_zh || item.display_name || item.name}</strong><em>{item.scientific_name || '学名待确认'}</em><small>{Math.round((item.confidence ?? 0) * 100)}%</small></div>)}</div></article>
+                <article className="recognition-wide"><span>Top 候选与相似物种</span><div className="alternative-list">{alternatives.map((item, index) => {
+                  const candidateName = cleanChineseDisplayName(item.common_name_zh || item.display_name || localTaxonName({ label: item.name, scientificName: item.scientific_name }), item.name)
+                  return <div key={`${item.name}-${index}`}><strong>{candidateName}</strong><small>{Math.round((item.confidence ?? 0) * 100)}%</small></div>
+                })}</div></article>
               )}
               <article className="recognition-wide location-save-panel">
                 <span>观察地点</span>
@@ -304,7 +324,7 @@ export default function RecognitionModal({
               </article>
               <div className="recognition-actions">
                 <button className="primary-btn" disabled={saving || Boolean(savedRecord || object.discovery_id)} onClick={() => void saveObservation()}>
-                  {savedRecord || object.discovery_id ? <CheckCircle2 /> : <Save />}{savedRecord || object.discovery_id ? '已保存为观察记录' : saving ? '正在保存…' : '确认并保存观察'}
+                  {savedRecord || object.discovery_id ? <CheckCircle2 /> : <Save />}{savedRecord || object.discovery_id ? '已保存为观察记录' : saving ? '正在保存...' : '确认并保存观察'}
                 </button>
                 {object.species_id && <button className="ghost-btn" onClick={() => onOpenSpecies?.(object.species_id!)}><Sparkles />打开内置图鉴</button>}
                 {!feedbackSent ? (
@@ -312,9 +332,9 @@ export default function RecognitionModal({
                     <button className="ghost-btn" disabled={feedbackLoading} onClick={() => void feedback(true)}><CheckCircle2 />识别正确</button>
                     <button className="ghost-btn" disabled={feedbackLoading} onClick={() => setCorrectionOpen(true)}><HelpCircle />我要修正</button>
                   </>
-                ) : <span className="feedback-thanks">感谢反馈，已加入模型改进数据和识别记录</span>}
+                ) : <span className="feedback-thanks">感谢反馈，已加入模型改进数据和识别记录。</span>}
               </div>
-              <div className="location-hint"><MapPin size={16} /><span>低置信度、幼体、局部照片和近似物种仍建议补拍或人工复核；珍稀物种不要公开精确位置。</span></div>
+              <div className="location-hint"><MapPin size={16} /><span>幼体、局部照片和相近物种仍建议补拍或人工复核；珍稀物种不要公开精确位置。</span></div>
             </div>
           )}
 
@@ -324,9 +344,9 @@ export default function RecognitionModal({
               <div className="qa-messages">
                 {messages.length === 0 && <div className="suggestion-grid">{['为什么会这样识别？', '怎样拍摄能提高准确率？', object.behavior ? '这个行为是否正常？' : '它和相似物种怎么区分？'].map((item) => <button key={item} onClick={() => void ask(item)}>{item}</button>)}</div>}
                 {messages.map((item, index) => <div key={index} className={`qa-message ${item.role}`}>{item.content}</div>)}
-                {loading && <div className="qa-message assistant typing">正在结合识别目标、观察数据和科普资料分析…</div>}
+                {loading && <div className="qa-message assistant typing">正在结合识别目标、观察数据和科普资料分析...</div>}
               </div>
-              <div className="qa-input"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void ask()} placeholder={`继续问问“${title}”…`} /><button onClick={() => void ask()}><Send /></button></div>
+              <div className="qa-input"><input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => event.key === 'Enter' && void ask()} placeholder={`继续问“${title}”...`} /><button onClick={() => void ask()}><Send /></button></div>
             </div>
           )}
 

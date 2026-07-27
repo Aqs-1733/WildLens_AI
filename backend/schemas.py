@@ -182,6 +182,7 @@ class PhotoObjectOut(BaseModel):
     track_id: int = 0
     category: str
     label: str
+    common_name_zh: str = ""
     scientific_name: str = ""
     confidence: float
     bbox: dict
@@ -265,6 +266,7 @@ class RecognitionFeedbackRequest(BaseModel):
 class ReidentifyRequest(BaseModel):
     hint: str = Field(default="", max_length=1000)
     address: str = Field(default="", max_length=200)
+    scopes: str = Field(default="animals,plants,fungi,phenomena,behaviors", max_length=120)
 
 
 class SpeciesGuideOut(BaseModel):

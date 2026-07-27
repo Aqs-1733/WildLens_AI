@@ -6,9 +6,28 @@ from sqlalchemy.orm import Session
 
 from backend.core.database import get_db
 from backend.deps import get_current_user
-from backend.models import AnalysisJob, Detection, RiskEvent, Species, User, UserCollection
+from backend.models import AnalysisJob, Detection, DiscoveryRecord, RiskEvent, Species, User, UserCollection
+from backend.services.taxon_names import has_cjk, normalize_category
 
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
+
+EXCLUDED_DASHBOARD_CATEGORIES = {"unknown", "person", "vehicle", "human"}
+UNCERTAIN_DASHBOARD_TOKENS = ("低置信度", "待确认", "疑似", "候选", "unknown", "unidentified")
+
+
+def _dashboard_observation_title(record: DiscoveryRecord) -> str:
+    return " ".join(str(record.phenomenon or record.behavior or record.title or "").split())
+
+
+def _include_dashboard_observation(record: DiscoveryRecord) -> bool:
+    title = _dashboard_observation_title(record)
+    category = normalize_category(record.category)
+    if category in EXCLUDED_DASHBOARD_CATEGORIES:
+        return False
+    if not has_cjk(title):
+        return False
+    lowered = title.lower()
+    return not any(token.lower() in lowered for token in UNCERTAIN_DASHBOARD_TOKENS)
 
 
 @router.get("")
@@ -22,9 +41,15 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
     ) or 0
     latest_jobs = db.scalars(select(AnalysisJob).order_by(AnalysisJob.id.desc()).limit(5)).all()
     latest_events = db.scalars(select(RiskEvent).order_by(RiskEvent.id.desc()).limit(5)).all()
-    category_rows = db.execute(
-        select(Detection.category, func.count(Detection.id)).group_by(Detection.category)
+    category_distribution: dict[str, int] = {}
+    observation_rows = db.scalars(
+        select(DiscoveryRecord).where(DiscoveryRecord.user_id == user.id)
     ).all()
+    for record in observation_rows:
+        if not _include_dashboard_observation(record):
+            continue
+        category = normalize_category(record.category)
+        category_distribution[category] = category_distribution.get(category, 0) + 1
     return {
         "stats": {
             "analysis_jobs": jobs,
@@ -36,7 +61,10 @@ def dashboard(db: Session = Depends(get_db), user: User = Depends(get_current_us
             "stars": user.stars,
             "level": user.level,
         },
-        "category_distribution": [{"name": row[0], "value": row[1]} for row in category_rows],
+        "category_distribution": [
+            {"name": name, "value": value}
+            for name, value in sorted(category_distribution.items(), key=lambda item: item[1], reverse=True)
+        ],
         "latest_jobs": [
             {
                 "id": item.id,

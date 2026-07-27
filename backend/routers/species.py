@@ -20,6 +20,7 @@ from backend.models import (
     Taxon,
     TaxonImage,
     User,
+    UserBadgeClaim,
     UserCollection,
     UserTaskProgress,
     now_utc,
@@ -203,6 +204,7 @@ def learning_tasks(db: Session = Depends(get_db), user: User = Depends(get_curre
             "progress": stored.progress if stored else progress_value,
             "completed": stored.completed if stored else completed,
             "claimed": stored.claimed if stored else False,
+            "remaining": max(0, task.target_value - (stored.progress if stored else progress_value)),
         })
     db.commit()
     return rows
@@ -271,8 +273,7 @@ def claim_learning_reward(
     )
 
 
-@router.get("/learning/badges")
-def learning_badges(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+def _badge_definitions(db: Session, user: User) -> list[dict]:
     observed = int(db.scalar(select(func.count(DiscoveryRecord.id)).where(DiscoveryRecord.user_id == user.id)) or 0)
     unique_taxa = int(
         db.scalar(
@@ -303,6 +304,12 @@ def learning_badges(db: Session = Depends(get_db), user: User = Depends(get_curr
         )
         or 0
     )
+    claimed_ids = {
+        item.badge_id
+        for item in db.scalars(
+            select(UserBadgeClaim).where(UserBadgeClaim.user_id == user.id)
+        ).all()
+    }
     families = [
         ("观察", "自然观察者", observed, [1, 5, 10, 25, 50, 100, 250, 500, 1000]),
         ("物种", "物种记录员", unique_taxa, [1, 5, 10, 25, 50, 100, 250, 500, 1000]),
@@ -324,10 +331,55 @@ def learning_badges(db: Session = Depends(get_db), user: User = Depends(get_curr
                     "progress": progress,
                     "target": target,
                     "earned": progress >= target,
+                    "claimed": badge_id in claimed_ids,
+                    "remaining": max(0, target - progress),
+                    "reward_points": 30 + level * 10,
+                    "reward_stars": min(5, 1 + level // 3),
                 }
             )
             badge_id += 1
     return output
+
+
+@router.get("/learning/badges")
+def learning_badges(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+    return _badge_definitions(db, user)
+
+
+@router.post("/learning/badges/{badge_id}/claim", response_model=TaskClaimResponse)
+def claim_badge_reward(
+    badge_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> TaskClaimResponse:
+    badge = next((item for item in _badge_definitions(db, user) if item["id"] == badge_id), None)
+    if not badge:
+        raise HTTPException(status_code=404, detail="徽章不存在")
+    if not badge["earned"]:
+        raise HTTPException(status_code=400, detail=f"徽章尚未达成，还差 {badge['remaining']} 次")
+    existing = db.scalar(
+        select(UserBadgeClaim).where(
+            UserBadgeClaim.user_id == user.id,
+            UserBadgeClaim.badge_id == badge_id,
+        )
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="徽章奖励已经领取")
+    db.add(
+        UserBadgeClaim(
+            user_id=user.id,
+            badge_id=badge_id,
+            name=str(badge["name"]),
+            category=str(badge["category"]),
+            reward_points=int(badge["reward_points"]),
+            reward_stars=int(badge["reward_stars"]),
+        )
+    )
+    user.points += int(badge["reward_points"])
+    user.stars += int(badge["reward_stars"])
+    user.level = max(1, 1 + user.points // 300)
+    db.commit()
+    return TaskClaimResponse(message="徽章领取成功", points=user.points, stars=user.stars)
 
 
 @router.get("/{species_id}/observations")
