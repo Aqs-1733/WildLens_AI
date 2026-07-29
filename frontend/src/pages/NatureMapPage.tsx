@@ -96,7 +96,7 @@ export default function NatureMapPage() {
             formatter: (params: any) => {
               const item = params.data?.item as ObservationPoint | undefined
               if (!item) return params.name || ''
-              return `<strong>${item.title}</strong><br/><em>${item.scientific_name || '学名待确认'}</em><br/>${formatPlace(item)}<br/>置信度 ${(item.confidence * 100).toFixed(1)}%${item.is_first ? '<br/>★ 首次发现' : ''}`
+              return `<strong>${item.title}</strong><br/><em>${item.scientific_name || '暂无学名'}</em><br/>${formatPlace(item)}<br/>置信度 ${(item.confidence * 100).toFixed(1)}%${item.is_first ? '<br/>★ 首次发现' : ''}`
             },
           },
           geo: {
@@ -150,7 +150,7 @@ export default function NatureMapPage() {
     </section>
     {selected && <section className="panel map-selection-card">
       {selected.image_url ? <img src={mediaUrl(selected.image_url)} alt={selected.title}/> : <div className="selection-placeholder"><MapPinned/></div>}
-      <div><span className="eyebrow">OBSERVATION #{selected.id}</span><h3>{selected.title}</h3><em>{selected.scientific_name || '学名待确认'}</em>{selected.description && <p className="selection-description">{selected.description}</p>}<p>{formatPlace(selected)} · {formatBeijingDateTime(selected.observed_at)}</p><div className="selection-tags">{selected.is_first && <span>★ 首次发现</span>}{selected.behavior && <span>行为：{selected.behavior}</span>}{selected.phenomenon && <span>现象：{selected.phenomenon}</span>}<span>位置权限：{selected.privacy_level}</span></div></div>
+      <div><span className="eyebrow">OBSERVATION #{selected.id}</span><h3>{selected.title}</h3><em>{selected.scientific_name || '暂无学名'}</em>{selected.description && <p className="selection-description">{selected.description}</p>}<p>{formatPlace(selected)} · {formatBeijingDateTime(selected.observed_at)}</p><div className="selection-tags">{selected.is_first && <span>★ 首次发现</span>}{selected.behavior && <span>行为：{selected.behavior}</span>}{selected.phenomenon && <span>现象：{selected.phenomenon}</span>}<span>位置权限：{selected.privacy_level}</span></div></div>
     </section>}
     <p className="map-attribution">地图轮廓：Natural Earth 公共领域数据，仅用于自然观察分布展示，不作为测绘或行政边界依据。</p>
   </div>

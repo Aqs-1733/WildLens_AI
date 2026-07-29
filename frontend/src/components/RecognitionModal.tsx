@@ -44,7 +44,7 @@ async function requestLocation(): Promise<LocationPayload> {
 
 function evidenceText(item: unknown): string {
   if (typeof item === 'string') {
-    if (/SpeciesNet classifier/i.test(item)) return 'SpeciesNet 目标检测/分类候选'
+    if (/SpeciesNet classifier/i.test(item)) return 'SpeciesNet 目标检测/分类结果'
     if (/both produced evidence but disagree/i.test(item)) return 'SpeciesNet 与 BioCLIP 结果不一致，建议复核'
     if (/BioCLIP matched/i.test(item)) return 'BioCLIP 本地原型库命中'
     return item
@@ -288,7 +288,7 @@ export default function RecognitionModal({
               <article><span>模型解释</span><p>{object.explanation || '暂无详细解释，建议补充更多角度照片。'}</p></article>
               <article><span>可见依据</span><div className="evidence-list">{evidenceItems.map((item, index) => <b key={`${item}-${index}`}><CheckCircle2 />{item}</b>)}</div></article>
               {alternatives.length > 0 && (
-                <article className="recognition-wide"><span>Top 候选与相似物种</span><div className="alternative-list">{alternatives.map((item, index) => {
+                <article className="recognition-wide"><span>Top 结果与生物学相近种</span><div className="alternative-list">{alternatives.map((item, index) => {
                   const candidateName = cleanChineseDisplayName(item.common_name_zh || item.display_name || localTaxonName({ label: item.name, scientificName: item.scientific_name }), item.name)
                   return <div key={`${item.name}-${index}`}><strong>{candidateName}</strong><small>{Math.round((item.confidence ?? 0) * 100)}%</small></div>
                 })}</div></article>
@@ -317,7 +317,7 @@ export default function RecognitionModal({
               <article className="recognition-wide inline-ai-question">
                 <span>直接提问</span>
                 <div className="qa-input">
-                  <input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { setTab('ask'); void ask() } }} placeholder={`直接问 AI：${title} 有什么特征、怎么区分、怎么观察？`} />
+                  <input value={question} onChange={(event) => setQuestion(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') { setTab('ask'); void ask() } }} placeholder={`直接提问：${title} 有什么特征、怎么区分、怎么观察？`} />
                   <button onClick={() => { setTab('ask'); void ask() }}><Send /></button>
                 </div>
                 <p>提问会保存到“自然问答”的历史记录里，之后可以继续查找和接着问。</p>

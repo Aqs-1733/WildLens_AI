@@ -8,10 +8,10 @@ import type { PhotoIdentifyResult, PhotoObject, SpeciesGuide } from '../types'
 import { categoryNameZh, hasChinese, localTaxonName } from '../utils/taxonNames'
 
 const categoryLabels: Record<string, string> = {
-  mammal: '哺乳动物', bird: '鸟类', reptile: '爬行动物', amphibian: '两栖动物', fish: '鱼类',
+  animal: '动物', mammal: '哺乳动物', bird: '鸟类', reptile: '爬行动物', amphibian: '两栖动物', fish: '鱼类',
   insect: '昆虫', arachnid: '蛛形动物', mollusk: '软体动物', crustacean: '甲壳动物', invertebrate: '其他无脊椎动物',
   plant: '植物', angiosperm: '被子植物', gymnosperm: '裸子植物', fern: '蕨类', moss: '苔藓', algae: '藻类',
-  fungus: '真菌', lichen: '地衣', phenomenon: '自然现象', weather: '天气现象', fire: '火焰现象', smoke: '烟雾现象', unknown: '未确定目标',
+  fungus: '真菌', lichen: '地衣', phenomenon: '自然现象', weather: '天气现象', fire: '火焰现象', smoke: '烟雾现象', unknown: '自然目标',
 }
 
 const scopeOptions = [
@@ -41,7 +41,7 @@ const displaySpeciesName = (object: PhotoObject) => {
   })
   if (hasChinese(localized)) return localized
   const category = categoryLabels[object.category]
-  return category ? `${category}候选` : localized
+  return category || localized
 }
 
 export default function PhotoIdentifyPage() {

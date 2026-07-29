@@ -50,7 +50,7 @@ const publicNav: NavItem[] = [
 const regulatorNav: NavItem[] = [
   { path: '/alerts', icon: AlertTriangle, label: '风险事件' },
   { path: '/review', icon: ClipboardCheck, label: '人工复核' },
-  { path: '/reports', icon: FileText, label: 'AI报告' },
+  { path: '/reports', icon: FileText, label: '分析报告' },
   { path: '/models', icon: FlaskConical, label: '模型中心' },
   { path: '/datasets', icon: Network, label: '数据集管理' },
 ]
@@ -86,7 +86,7 @@ export default function Layout() {
           ))}
         </nav>
         <div className="sidebar-engine">
-          <div className="engine-title"><Bot size={17} /> AI ENGINE</div>
+          <div className="engine-title"><Bot size={17} /> LOCAL ENGINE</div>
           <div className="status-line"><span className="status-dot" />系统在线</div>
         </div>
       </aside>

@@ -42,7 +42,7 @@ test('navigation labels match the product acceptance surface', () => {
     '数据分析',
     '模型中心',
     '数据集管理',
-    'AI报告',
+    '分析报告',
     '个人信息',
   ]
   for (const label of labels) {

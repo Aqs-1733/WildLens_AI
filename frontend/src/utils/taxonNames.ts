@@ -82,6 +82,7 @@ const englishZh: Record<string, string> = {
 }
 
 const categoryZh: Record<string, string> = {
+  animal: '动物',
   mammal: '哺乳动物',
   bird: '鸟类',
   reptile: '爬行动物',
@@ -104,7 +105,7 @@ const categoryZh: Record<string, string> = {
   weather: '天气现象',
   fire: '火焰现象',
   smoke: '烟雾现象',
-  unknown: '未分类',
+  unknown: '自然目标',
 }
 
 function clean(value?: string | null): string {
@@ -116,10 +117,12 @@ export function hasChinese(value?: string | null): boolean {
 }
 
 export function cleanChineseDisplayName(value?: string | null, fallback?: string): string {
+  const valueUncertain = isUncertainName(value)
   const raw = clean(value).replace(latinParenPattern, '').replace(/\s+/g, ' ').trim()
-  if (hasChinese(raw)) return raw
+  if (hasChinese(raw) && !valueUncertain && !isUncertainName(raw)) return raw
   const fallbackText = clean(fallback).replace(latinParenPattern, '').trim()
-  return fallbackText || raw
+  if (fallbackText && !isUncertainName(fallbackText)) return fallbackText
+  return valueUncertain ? '' : raw
 }
 
 export function isUncertainName(value?: string | null): boolean {
@@ -127,7 +130,7 @@ export function isUncertainName(value?: string | null): boolean {
 }
 
 export function categoryNameZh(category?: string | null): string {
-  return categoryZh[category || ''] || category || '未分类'
+  return categoryZh[category || ''] || category || '自然目标'
 }
 
 export function localTaxonName({
@@ -143,12 +146,15 @@ export function localTaxonName({
 }): string {
   const labelText = clean(label)
   const scientificText = clean(scientificName)
-  if (hasChinese(labelText)) return labelText
+  const labelUncertain = isUncertainName(label) || isUncertainName(labelText)
+  const fallbackText = clean(fallback)
+  if (hasChinese(labelText) && !labelUncertain) return labelText
   if (scientificText && scientificZh[scientificText]) return scientificZh[scientificText]
   const baseScientific = scientificText.split(/\s+/).slice(0, 2).join(' ')
   if (baseScientific && scientificZh[baseScientific]) return scientificZh[baseScientific]
   const englishText = labelText.toLowerCase()
-  if (englishText && englishZh[englishText]) return englishZh[englishText]
+  if (!labelUncertain && englishText && englishZh[englishText]) return englishZh[englishText]
   if (scientificText && englishZh[scientificText.toLowerCase()]) return englishZh[scientificText.toLowerCase()]
-  return fallback || labelText || scientificText || categoryZh[category || ''] || '未确定目标'
+  if (fallbackText && !isUncertainName(fallbackText)) return fallbackText
+  return (!labelUncertain && labelText) || scientificText || categoryZh[category || ''] || '自然目标'
 }

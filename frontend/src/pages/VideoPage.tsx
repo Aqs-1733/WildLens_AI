@@ -41,9 +41,9 @@ function categoryLabel(category: string): string {
     phenomenon: '自然现象',
     person: '人员',
     vehicle: '车辆',
-    unknown: '未确定目标',
+    unknown: '自然目标',
   }
-  return labels[category] || categoryNameZh(category) || '未确定目标'
+  return labels[category] || categoryNameZh(category) || '自然目标'
 }
 
 function displayName(track: VideoTrack): string {
@@ -51,7 +51,7 @@ function displayName(track: VideoTrack): string {
     label: track.label,
     scientificName: track.scientific_name,
     category: track.category,
-    fallback: track.label || track.scientific_name || '未确定目标',
+    fallback: track.label || track.scientific_name || '自然目标',
   })
 }
 
