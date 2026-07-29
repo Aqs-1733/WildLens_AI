@@ -239,6 +239,16 @@ export default function CommunityPage() {
     await load()
   }
 
+  const createSelectedDirect = async () => {
+    if (groupMembers.length !== 1) return
+    await createChat([groupMembers[0]], '')
+  }
+
+  const createSelectedGroup = async () => {
+    if (groupMembers.length < 2) return
+    await createChat(groupMembers, groupTitle)
+  }
+
   const toggleGroupMember = (id: number) => {
     const value = String(id)
     setGroupMembers((items) => items.includes(value) ? items.filter((item) => item !== value) : [...items, value])
@@ -303,13 +313,16 @@ export default function CommunityPage() {
         <div className="friend-list">{friends.map((friend) => <div className="friend-row" key={friend.id}><Avatar user={friend} /><div><strong>{friend.display_name}</strong><span>Lv.{friend.level} · {friend.badges.join(' / ')}</span><small>{friend.bio}</small></div><div className="friend-actions"><button title="开始私聊" onClick={() => void createChat([String(friend.id)], '')}><MessageCircle /></button><button title="删除好友" onClick={() => void removeFriend(friend.id)}><Trash2 /></button></div></div>)}</div>
         <div className="pending-box"><strong><Bell size={15} />提醒</strong>{notices.slice(0, 6).map((notice) => <button key={notice.id}><span>{notice.title}</span>{notice.read ? <CheckCircle2 /> : '未读'}</button>)}</div>
         <div className="pending-box chat-create-box">
-          <strong><MessageCircle size={15} />聊天 / 群聊</strong>
+          <strong><MessageCircle size={15} />新建聊天</strong>
           <div className="chat-member-picker">{friends.map((friend) => {
             const active = groupMembers.includes(String(friend.id))
             return <button type="button" className={active ? 'active' : ''} key={friend.id} onClick={() => toggleGroupMember(friend.id)}><Avatar user={friend} /><span>{friend.display_name}</span></button>
           })}</div>
-          {groupMembers.length > 1 && <input value={groupTitle} onChange={(event) => setGroupTitle(event.target.value)} placeholder="群聊名称（可选，不填自动生成）" />}
-          <button disabled={!groupMembers.length} onClick={() => void createChat()}>{groupMembers.length > 1 ? '创建多人群聊' : '开始私聊'}</button>
+          <input value={groupTitle} disabled={groupMembers.length < 2} onChange={(event) => setGroupTitle(event.target.value)} placeholder={groupMembers.length < 2 ? '选择至少两位好友后填写群聊名称' : '群聊名称（可选，不填自动生成）'} />
+          <div className="chat-create-actions">
+            <button disabled={groupMembers.length !== 1} onClick={() => void createSelectedDirect()}>开始私聊</button>
+            <button disabled={groupMembers.length < 2} onClick={() => void createSelectedGroup()}>创建群聊</button>
+          </div>
           <div className="chat-thread-list">{threads.map((thread) => <button className="thread-button" key={thread.id} onClick={() => setSelectedThread(thread)}><span>{threadTitle(thread)}</span>{thread.thread_type === 'group' ? '多人聊天' : '私聊'}</button>)}</div>
         </div>
       </aside>
