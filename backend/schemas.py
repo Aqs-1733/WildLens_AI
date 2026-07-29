@@ -149,6 +149,10 @@ class ChatThreadCreate(BaseModel):
     member_ids: list[int] = Field(default_factory=list, max_length=50)
 
 
+class ChatThreadUpdate(BaseModel):
+    title: str = Field(min_length=1, max_length=180)
+
+
 class ChatMessageCreate(BaseModel):
     content: str = Field(default="", max_length=2000)
     image_url: str = Field(default="", max_length=700)

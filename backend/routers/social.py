@@ -25,12 +25,19 @@ from backend.models import (
     User,
     now_utc,
 )
-from backend.schemas import ChatMessageCreate, ChatThreadCreate, CommentCreate, FriendRequestCreate, PostCreate
+from backend.schemas import ChatMessageCreate, ChatThreadCreate, ChatThreadUpdate, CommentCreate, FriendRequestCreate, PostCreate
 from backend.services.text_clean import clean_text
 
 router = APIRouter(prefix="/api/social", tags=["social"])
 settings = get_settings()
-ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}
+ALLOWED_UPLOAD_TYPES = {
+    "image/jpeg": ".jpg",
+    "image/png": ".png",
+    "image/webp": ".webp",
+    "video/mp4": ".mp4",
+    "video/webm": ".webm",
+    "video/quicktime": ".mov",
+}
 
 
 def _user_brief(user: User) -> dict:
@@ -63,12 +70,13 @@ async def upload_social_attachment(
     _: User = Depends(get_current_user),
 ) -> dict:
     content_type = (file.content_type or mimetypes.guess_type(file.filename or "")[0] or "").lower()
-    if content_type not in ALLOWED_IMAGE_TYPES:
-        raise HTTPException(status_code=400, detail="仅支持 JPG、PNG、WebP 图片")
-    payload = await file.read(10 * 1024 * 1024 + 1)
-    if len(payload) > 10 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="图片不能超过 10MB")
-    filename = f"post_{uuid.uuid4().hex}{ALLOWED_IMAGE_TYPES[content_type]}"
+    if content_type not in ALLOWED_UPLOAD_TYPES:
+        raise HTTPException(status_code=400, detail="仅支持 JPG、PNG、WebP 图片和 MP4、WebM、MOV 视频")
+    max_bytes = 80 * 1024 * 1024 if content_type.startswith("video/") else 10 * 1024 * 1024
+    payload = await file.read(max_bytes + 1)
+    if len(payload) > max_bytes:
+        raise HTTPException(status_code=413, detail="图片不能超过 10MB，视频不能超过 80MB")
+    filename = f"post_{uuid.uuid4().hex}{ALLOWED_UPLOAD_TYPES[content_type]}"
     path = settings.upload_dir / filename
     path.write_bytes(payload)
     return {"image_url": f"/media/uploads/{path.name}"}
@@ -537,7 +545,43 @@ def _thread_member_ids(thread: ChatThread) -> set[int]:
     return {int(item) for item in (thread.member_ids or [])}
 
 
-def _thread_dict(db: Session, thread: ChatThread) -> dict:
+def _direct_thread_title(db: Session, thread: ChatThread, viewer_id: int) -> str:
+    other_ids = [item for item in _thread_member_ids(thread) if item != viewer_id]
+    if not other_ids:
+        return clean_text(thread.title, "私聊")
+    other = db.get(User, other_ids[0])
+    return _user_brief(other)["display_name"] if other else clean_text(thread.title, "私聊")
+
+
+def _find_direct_thread(db: Session, member_ids: set[int]) -> ChatThread | None:
+    matches = [
+        thread
+        for thread in db.scalars(select(ChatThread).where(ChatThread.thread_type == "direct")).all()
+        if _thread_member_ids(thread) == member_ids
+    ]
+    if not matches:
+        return None
+    matches.sort(key=lambda item: (item.updated_at, item.id), reverse=True)
+    keep = matches[0]
+    for duplicate in matches[1:]:
+        messages = db.scalars(select(ChatMessage).where(ChatMessage.thread_id == duplicate.id)).all()
+        for message in messages:
+            message.thread_id = keep.id
+        db.delete(duplicate)
+    keep.member_ids = sorted(member_ids)
+    return keep
+
+
+def _media_kind(url: str) -> str:
+    value = (url or "").split("?", 1)[0].lower()
+    if value.endswith((".mp4", ".webm", ".mov")):
+        return "video"
+    if value.endswith((".jpg", ".jpeg", ".png", ".webp")):
+        return "image"
+    return ""
+
+
+def _thread_dict(db: Session, thread: ChatThread, viewer_id: int | None = None) -> dict:
     members = [db.get(User, item) for item in _thread_member_ids(thread)]
     last = db.scalar(
         select(ChatMessage)
@@ -545,9 +589,12 @@ def _thread_dict(db: Session, thread: ChatThread) -> dict:
         .order_by(ChatMessage.created_at.desc())
         .limit(1)
     )
+    title = thread.title
+    if thread.thread_type == "direct" and viewer_id:
+        title = _direct_thread_title(db, thread, viewer_id)
     return {
         "id": thread.id,
-        "title": thread.title,
+        "title": title,
         "thread_type": thread.thread_type,
         "members": [_user_brief(item) for item in members if item],
         "last_message": last.content if last else "",
@@ -559,7 +606,17 @@ def _thread_dict(db: Session, thread: ChatThread) -> dict:
 @router.get("/chats")
 def list_chats(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
     threads = db.scalars(select(ChatThread).order_by(ChatThread.updated_at.desc())).all()
-    return [_thread_dict(db, item) for item in threads if user.id in _thread_member_ids(item)]
+    output = []
+    seen_direct: set[tuple[int, ...]] = set()
+    for item in threads:
+        if user.id in _thread_member_ids(item):
+            if item.thread_type == "direct":
+                key = tuple(sorted(_thread_member_ids(item)))
+                if key in seen_direct:
+                    continue
+                seen_direct.add(key)
+            output.append(_thread_dict(db, item, user.id))
+    return output
 
 
 @router.post("/chats")
@@ -574,13 +631,20 @@ def create_chat(
     for member_id in member_ids:
         if not db.get(User, member_id):
             raise HTTPException(status_code=404, detail=f"用户 {member_id} 不存在")
+    thread_type = "group" if len(member_ids) > 2 else "direct"
+    if thread_type == "direct":
+        existing = _find_direct_thread(db, member_ids)
+        if existing:
+            existing.updated_at = now_utc()
+            db.commit()
+            return _thread_dict(db, existing, user.id)
     title = payload.title.strip()
     if not title:
-        names = [db.get(User, item).display_name for item in member_ids if db.get(User, item)]
-        title = "、".join(names[:4])
+        names = [db.get(User, item).display_name for item in sorted(member_ids) if db.get(User, item)]
+        title = "、".join(names[:4]) if thread_type == "direct" else f"{'、'.join(names[:3])}的观察群"
     thread = ChatThread(
         title=title[:180],
-        thread_type="group" if len(member_ids) > 2 else "direct",
+        thread_type=thread_type,
         owner_id=user.id,
         member_ids=sorted(member_ids),
         updated_at=now_utc(),
@@ -591,7 +655,40 @@ def create_chat(
         if member_id != user.id:
             _notify(db, member_id, user.id, "chat_invite", "新的聊天", f"{user.display_name} 邀请你加入“{thread.title}”。", {"thread_id": thread.id})
     db.commit()
-    return _thread_dict(db, thread)
+    return _thread_dict(db, thread, user.id)
+
+
+@router.patch("/chats/{thread_id}")
+def update_chat(
+    thread_id: int,
+    payload: ChatThreadUpdate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    thread = db.get(ChatThread, thread_id)
+    if not thread or user.id not in _thread_member_ids(thread):
+        raise HTTPException(status_code=404, detail="聊天不存在")
+    if thread.thread_type != "group":
+        raise HTTPException(status_code=400, detail="私聊不需要改名")
+    title = payload.title.strip()
+    if not title:
+        raise HTTPException(status_code=400, detail="群聊名称不能为空")
+    old_title = thread.title
+    thread.title = title[:180]
+    thread.updated_at = now_utc()
+    for member_id in _thread_member_ids(thread):
+        if member_id != user.id:
+            _notify(
+                db,
+                member_id,
+                user.id,
+                "chat_rename",
+                "群聊名称已更新",
+                f"{user.display_name} 将“{old_title}”改名为“{thread.title}”。",
+                {"thread_id": thread.id},
+            )
+    db.commit()
+    return _thread_dict(db, thread, user.id)
 
 
 @router.get("/chats/{thread_id}/messages")
@@ -622,6 +719,7 @@ def chat_messages(
             "sender": _user_brief(sender) if (sender := db.get(User, item.sender_id)) else None,
             "content": item.content,
             "image_url": item.image_url,
+            "media_type": _media_kind(item.image_url),
             "created_at": item.created_at,
         }
         for item in messages
@@ -650,6 +748,7 @@ def send_chat_message(
     db.add(message)
     for member_id in _thread_member_ids(thread):
         if member_id != user.id:
-            _notify(db, member_id, user.id, "chat_message", f"{thread.title} 有新消息", payload.content[:80], {"thread_id": thread.id})
+            body = payload.content[:80] or ("发来一段视频" if _media_kind(payload.image_url) == "video" else "发来一张图片")
+            _notify(db, member_id, user.id, "chat_message", f"{thread.title} 有新消息", body, {"thread_id": thread.id})
     db.commit()
     return {"message": "已发送", "id": message.id}

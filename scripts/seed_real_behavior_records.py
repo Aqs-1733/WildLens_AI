@@ -316,7 +316,7 @@ def ensure_behavior_case(db, user: User, case: dict[str, Any], index: int) -> tu
             mode="behavior-photo-test",
             enabled_targets=["animals", "behaviors"],
             summary={
-                "scene_summary": "真实动物行为测试",
+                "scene_summary": "真实动物行为观察",
                 "scene_type": "animal_behavior",
                 "objects": 1,
                 "categories": {species.category: 1},
@@ -385,7 +385,7 @@ def ensure_behavior_case(db, user: User, case: dict[str, Any], index: int) -> tu
         job.mode = "behavior-photo-test"
         job.enabled_targets = ["animals", "behaviors"]
         job.summary = {
-            "scene_summary": "真实动物行为测试",
+            "scene_summary": "真实动物行为观察",
             "scene_type": "animal_behavior",
             "objects": 1,
             "categories": {species.category: 1},
@@ -450,10 +450,8 @@ def ensure_behavior_case(db, user: User, case: dict[str, Any], index: int) -> tu
             ObservationPost.discovery_id == record.id,
         )
     )
-    content = (
-        f"今天补了一条动物行为测试：{case['species']}在{case['location']}出现“{case['behavior']}”。"
-        f"{case['note'].replace('真实行为测试：', '')}"
-    )
+    note = case["note"].replace("真实行为测试：", "")
+    content = f"{case['location']}这次观察到{case['species']}的“{case['behavior']}”。{note}"
     if existing_post:
         existing_post.species_id = species.id
         existing_post.content = content
