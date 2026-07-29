@@ -896,18 +896,26 @@ def observation_summary(
         title = _clean_record_title(db, record)
         if not _is_clean_observation(record, title):
             continue
-        key = (
-            f"species:{record.species_id}"
-            if record.species_id
-            else f"name:{record.scientific_name or title or record.category}".lower()
-        )
+        if record.record_type == "behavior":
+            key = f"behavior:{record.species_id or record.scientific_name or record.category}:{record.behavior or title}".lower()
+        elif record.record_type == "phenomenon":
+            key = f"phenomenon:{record.phenomenon or title or record.category}".lower()
+        else:
+            key = (
+                f"species:{record.species_id}"
+                if record.species_id
+                else f"name:{record.scientific_name or title or record.category}".lower()
+            )
         item = grouped.get(key)
         if not item:
             item = {
                 "species_id": record.species_id,
+                "record_type": record.record_type,
                 "title": title,
                 "scientific_name": record.scientific_name,
                 "category": record.category,
+                "behavior": record.behavior,
+                "phenomenon": record.phenomenon,
                 "count": 0,
                 "first_discovered_at": record.created_at,
                 "last_discovered_at": record.created_at,
@@ -920,6 +928,9 @@ def observation_summary(
             item["title"] = title
             item["scientific_name"] = record.scientific_name
             item["category"] = record.category
+            item["record_type"] = record.record_type
+            item["behavior"] = record.behavior
+            item["phenomenon"] = record.phenomenon
             item["last_discovered_at"] = record.created_at
             item["latest_record_id"] = record.id
             item["latest_image_url"] = record.image_url or item["latest_image_url"]

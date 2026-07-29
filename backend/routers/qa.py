@@ -184,6 +184,14 @@ async def ask(
         db.flush()
     elif conversation.user_id != user.id:
         raise HTTPException(status_code=404, detail="聊天记录不存在")
+    if not species and conversation.species_id:
+        species = db.get(Species, conversation.species_id)
+    effective_job_id = payload.job_id or conversation.job_id
+    effective_detection_id = payload.detection_id or conversation.detection_id
+    if payload.job_id:
+        conversation.job_id = payload.job_id
+    if payload.detection_id:
+        conversation.detection_id = payload.detection_id
     if conversation.title in {"新的自然问答", "自然智能问答"} or len(conversation.title) < 6:
         conversation.title = clean_title(payload.question, fallback="新的自然问答")
     mutation_intent = _record_mutation_intent(payload.question)
@@ -194,29 +202,21 @@ async def ask(
             _maybe_create_footprint(db, user, species, location_text, payload.question, payload.image_url)
     user_content = f"{payload.question}\n\n[图片附件] {payload.image_url}" if payload.image_url else payload.question
     db.add(QAMessage(conversation_id=conversation.id, role="user", content=user_content))
+    mutation_sources: list[dict] = []
     mutation = await _handle_record_mutation(db, user, payload, species, location_text)
     if mutation:
-        answer, sources = mutation
-        db.add(
-            QAMessage(
-                conversation_id=conversation.id,
-                role="assistant",
-                content=answer,
-                sources=sources,
-            )
-        )
-        db.commit()
-        return QAResponse(
-            answer=answer,
-            conversation_id=conversation.id,
-            sources=sources,
-            mode="database_update",
-            fallback_reason=None,
-            suggested_questions=["查看观察记录", "继续修改这条记录", "补充这次观察备注"],
-        )
+        _, mutation_sources = mutation
     answer, sources, mode, fallback_reason, suggestions = await answer_question(
-        db, payload.question, species.id if species else payload.species_id, payload.job_id, payload.detection_id, user=user
+        db,
+        payload.question,
+        species.id if species else payload.species_id,
+        effective_job_id,
+        effective_detection_id,
+        user=user,
+        image_url=payload.image_url,
     )
+    if mutation_sources:
+        sources = [*mutation_sources, *sources]
     if species:
         remember_interaction(db, user, question=payload.question, answer=answer, species=species, location=location_text)
     db.add(

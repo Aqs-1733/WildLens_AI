@@ -5,9 +5,12 @@ import { categoryNameZh, cleanChineseDisplayName, hasChinese, isUncertainName, l
 
 type ObservationSummary = {
   species_id: number | null
+  record_type: 'species' | 'phenomenon' | 'behavior'
   title: string
   scientific_name: string
   category: string
+  behavior: string
+  phenomenon: string
   count: number
   first_discovered_at: string
   last_discovered_at: string
@@ -45,10 +48,10 @@ export default function DiscoveryHistoryPage() {
       category: item.category,
       fallback: item.title,
     }), item.title)
-    const type = item.category === 'phenomenon' || item.category === 'fire' || item.category === 'smoke' || item.category === 'weather'
-      ? 'phenomenon'
-      : item.category === 'behavior'
-        ? 'behavior'
+    const type = item.record_type === 'behavior'
+      ? 'behavior'
+      : item.record_type === 'phenomenon' || item.category === 'phenomenon' || item.category === 'fire' || item.category === 'smoke' || item.category === 'weather'
+        ? 'phenomenon'
         : 'species'
     return hasChinese(title) && !isUncertainName(title) && (!filter || type === filter) && `${title}${item.title}${item.scientific_name}${item.category}`.toLowerCase().includes(query.toLowerCase())
   }), [filter, query, records])
@@ -94,7 +97,7 @@ export default function DiscoveryHistoryPage() {
             <article key={`${record.species_id}-${record.scientific_name}-${record.title}`} className="discovery-entry type-species">
               <div className="discovery-date"><strong>{new Date(record.last_discovered_at).toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })}</strong><span>最近</span></div>
               <div className="discovery-card">
-                <div className="discovery-image">{record.latest_image_url ? <img src={mediaUrl(record.latest_image_url)} alt={title} /> : <div><ImageIcon /></div>}<span>{categoryNameZh(record.category)}</span></div>
+                <div className="discovery-image">{record.latest_image_url ? <img src={mediaUrl(record.latest_image_url)} alt={title} /> : <div><ImageIcon /></div>}<span>{record.record_type === 'behavior' ? `动物行为 · ${categoryNameZh(record.category)}` : categoryNameZh(record.category)}</span></div>
                 <div className="discovery-content"><div className="discovery-title"><div><h3>{title}</h3></div><strong><Repeat2 /> {record.count}</strong></div><p>首次：{new Date(record.first_discovered_at).toLocaleString('zh-CN')} · 最近：{new Date(record.last_discovered_at).toLocaleString('zh-CN')}</p><div className="discovery-meta"><span><Sparkles />累计 {record.count} 次观察</span><span>最新记录 #{record.latest_record_id}</span></div></div>
                 <button className="share-record-btn" onClick={() => { setShareId(record.latest_record_id); setShareText(`我观察到${title}，累计记录 ${record.count} 次。`) }}><Share2 />分享</button>
               </div>
