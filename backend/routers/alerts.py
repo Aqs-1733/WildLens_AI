@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core.database import get_db
+from backend.core.pagination import paginate_scalars
 from backend.deps import get_current_user, require_regulator
 from backend.models import RiskEvent, User
 from backend.schemas import ReviewEventRequest
@@ -14,9 +15,19 @@ router = APIRouter(prefix="/api/alerts", tags=["alerts"])
 
 @router.get("")
 def list_alerts(
-    db: Session = Depends(get_db), _: User = Depends(get_current_user)
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=30, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
 ) -> list[dict]:
-    items = db.scalars(select(RiskEvent).order_by(RiskEvent.created_at.desc())).all()
+    items = paginate_scalars(
+        db,
+        select(RiskEvent).order_by(RiskEvent.created_at.desc()),
+        response=response,
+        page=page,
+        limit=limit,
+    )
     return [
         {
             "id": item.id,

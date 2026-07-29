@@ -88,10 +88,30 @@ def merge_ai_correction(
     corrected = dict(local_result)
     ai_confidence = _safe_float(ai_result.get("confidence"))
     local_confidence = _safe_float(local_result.get("confidence"))
-    accepted = bool(ai_result) and ai_confidence >= min_accept_confidence and ai_confidence >= local_confidence
+    local_status = str(
+        local_result.get("fusion_status")
+        or local_result.get("fusion_decision")
+        or local_result.get("ai_correction_status")
+        or ""
+    ).strip().lower()
+    bioclip_evidence = local_result.get("bioclip_evidence")
+    local_uncertain = (
+        local_status in {"review", "unknown", "fallback"}
+        or bool(local_result.get("bioclip_is_weak"))
+        or (
+            isinstance(bioclip_evidence, dict)
+            and bool(bioclip_evidence.get("is_weak"))
+        )
+        or "low-confidence" in str(local_result.get("model_source") or "").lower()
+    )
+    accepted = (
+        bool(ai_result)
+        and ai_confidence >= min_accept_confidence
+        and (ai_confidence >= local_confidence or local_uncertain)
+    )
     local_scientific = str(local_result.get("scientific_name") or "").strip()
     ai_scientific = str(ai_result.get("scientific_name") or "").strip() if ai_result else ""
-    if local_scientific and not ai_scientific:
+    if local_scientific and not ai_scientific and not local_uncertain:
         accepted = False
 
     evidence = list(corrected.get("evidence") or [])

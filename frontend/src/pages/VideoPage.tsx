@@ -10,13 +10,15 @@ import {
   UploadCloud,
 } from 'lucide-react'
 import { Link } from 'react-router-dom'
-import { api, mediaUrl } from '../api/client'
+import { api, apiPage, mediaUrl } from '../api/client'
 import type { PhotoObject, VideoJob, VideoTrack } from '../types'
 import RecognitionModal from '../components/RecognitionModal'
 import VideoOverlay from '../components/VideoOverlay'
 import { categoryNameZh, localTaxonName } from '../utils/taxonNames'
 
 const activeStatuses = ['queued', 'preprocessing', 'extracting_frames', 'detecting', 'tracking', 'classifying', 'risk_analysis', 'rendering', 'processing']
+const JOB_PAGE_SIZE = 8
+const TRACK_PAGE_SIZE = 12
 
 type TrackWithFrame = VideoTrack & { frame_url?: string }
 
@@ -53,6 +55,16 @@ function displayName(track: VideoTrack): string {
   })
 }
 
+function isResolvedTrack(track: VideoTrack): boolean {
+  const name = displayName(track).trim().toLowerCase()
+  const scientific = (track.scientific_name || '').trim().toLowerCase()
+  const blocked = ['未确定', '待确认', '低置信度', '疑似', '候选', 'no cv', 'unknown']
+  if (!track.detection_id) return false
+  if (!name || blocked.some((token) => name.includes(token))) return false
+  if (scientific && blocked.some((token) => scientific.includes(token))) return false
+  return true
+}
+
 export default function VideoPage() {
   const [jobs, setJobs] = useState<VideoJob[]>([])
   const [job, setJob] = useState<VideoJob | null>(null)
@@ -64,17 +76,23 @@ export default function VideoPage() {
   const [mode, setMode] = useState('standard')
   const [targets, setTargets] = useState({ animals: true, plants: true, people: true, fire: true })
   const [autoRepairing, setAutoRepairing] = useState(false)
+  const [jobPage, setJobPage] = useState(1)
+  const [jobTotal, setJobTotal] = useState(0)
+  const [jobHasMore, setJobHasMore] = useState(false)
+  const [trackPage, setTrackPage] = useState(1)
+  const [trackTotal, setTrackTotal] = useState(0)
+  const [trackHasMore, setTrackHasMore] = useState(false)
 
-  const loadJobs = useCallback(
-    () => api<VideoJob[]>('/api/videos/jobs').then((items) => {
-      setJobs(items)
-      setJob((current) => current ?? items[0] ?? null)
-    }),
-    [],
-  )
+  const loadJobs = useCallback(async (page = 1) => {
+    const { items, meta } = await apiPage<VideoJob[]>(`/api/videos/jobs?page=${page}&limit=${JOB_PAGE_SIZE}`)
+    setJobs(items)
+    setJob((current) => current ?? items[0] ?? null)
+    setJobTotal(meta.total)
+    setJobHasMore(meta.hasMore)
+  }, [])
 
-  const loadTracks = useCallback(async (jobId: number) => {
-    const rows = await api<VideoTrack[]>(`/api/videos/jobs/${jobId}/tracks`)
+  const loadTracks = useCallback(async (jobId: number, page = 1) => {
+    const { items: rows, meta } = await apiPage<VideoTrack[]>(`/api/videos/jobs/${jobId}/tracks?page=${page}&limit=${TRACK_PAGE_SIZE}`)
     const enriched = await Promise.all(rows.map(async (track) => {
       const best = [...(track.keyframes || [])].sort((a, b) => b.confidence - a.confidence)[0]
       if (!best) return track
@@ -86,17 +104,25 @@ export default function VideoPage() {
       }
     }))
     setTracks(enriched)
+    setTrackTotal(meta.total)
+    setTrackHasMore(meta.hasMore)
   }, [])
 
-  useEffect(() => { void loadJobs() }, [loadJobs])
+  useEffect(() => { void loadJobs(jobPage) }, [jobPage, loadJobs])
+
+  useEffect(() => {
+    setTrackPage(1)
+  }, [job?.id])
 
   useEffect(() => {
     if (!job || job.status !== 'completed') {
       setTracks([])
+      setTrackTotal(0)
+      setTrackHasMore(false)
       return
     }
-    void loadTracks(job.id)
-  }, [job, loadTracks])
+    void loadTracks(job.id, trackPage)
+  }, [job, loadTracks, trackPage])
 
   useEffect(() => {
     if (!job || !activeStatuses.includes(job.status)) return
@@ -105,12 +131,12 @@ export default function VideoPage() {
       setJob(updated)
       if (updated.status === 'completed' || updated.status === 'failed') {
         window.clearInterval(timer)
-        await loadJobs()
-        if (updated.status === 'completed') await loadTracks(updated.id)
+        await loadJobs(jobPage)
+        if (updated.status === 'completed') await loadTracks(updated.id, trackPage)
       }
     }, 1800)
     return () => window.clearInterval(timer)
-  }, [job, loadJobs, loadTracks])
+  }, [job, jobPage, loadJobs, loadTracks, trackPage])
 
   const upload = async () => {
     if (!file) return
@@ -123,7 +149,8 @@ export default function VideoPage() {
       const result = await api<{ job_id: number }>('/api/videos/upload', { method: 'POST', body: form })
       const created = await api<VideoJob>(`/api/videos/jobs/${result.job_id}`)
       setJob(created)
-      await loadJobs()
+      setJobPage(1)
+      await loadJobs(1)
     } finally {
       setUploading(false)
     }
@@ -134,7 +161,7 @@ export default function VideoPage() {
     await api(`/api/videos/jobs/${job.id}/repair-playback`, { method: 'POST' })
     const updated = await api<VideoJob>(`/api/videos/jobs/${job.id}`)
     setJob(updated)
-    await loadJobs()
+    await loadJobs(jobPage)
   }
 
   useEffect(() => {
@@ -166,7 +193,7 @@ export default function VideoPage() {
   }, [selected])
 
   const selectedFrame = selected?.frame_url || ''
-  const completedTracks = tracks.filter((item) => item.detection_id)
+  const completedTracks = tracks.filter(isResolvedTrack)
 
   return (
     <div className="page-stack">
@@ -215,7 +242,7 @@ export default function VideoPage() {
           {job && job.status === 'completed' ? (
             <VideoOverlay
               src={mediaUrl(job.media.playback_url || job.media.url)}
-              tracks={tracks}
+              tracks={completedTracks}
               onSelect={setSelected}
               onTimeChange={setCurrentTimeMs}
               onRepair={repairPlayback}
@@ -240,6 +267,11 @@ export default function VideoPage() {
               </button>
             ))}
           </div>
+          <div className="pager-row">
+            <button className="ghost-btn" disabled={jobPage <= 1} onClick={() => setJobPage((page) => Math.max(1, page - 1))}>上一页</button>
+            <span>{jobPage} / {Math.max(1, Math.ceil(jobTotal / JOB_PAGE_SIZE))}</span>
+            <button className="ghost-btn" disabled={!jobHasMore} onClick={() => setJobPage((page) => page + 1)}>下一页</button>
+          </div>
           <div className="legend"><h4>标注颜色</h4><span><i style={{ background: '#F5A623' }} />哺乳动物</span><span><i style={{ background: '#55B8FF' }} />鸟类</span><span><i style={{ background: '#35E58C' }} />植物</span><span><i style={{ background: '#A87CFF' }} />昆虫/蛛形纲</span><span><i style={{ background: '#2FD5C4' }} />两栖/爬行</span><span><i style={{ background: '#FF5A67' }} />人员/风险</span></div>
         </aside>
       </div>
@@ -248,26 +280,33 @@ export default function VideoPage() {
         <section className="panel video-keyframes-panel">
           <div className="panel-head">
             <div><span className="eyebrow">KEY FRAMES</span><h3>识别到的目标帧</h3></div>
-            <span className="status-badge">{completedTracks.length} 个目标</span>
+            <span className="status-badge">{trackTotal} 个目标</span>
           </div>
           {completedTracks.length ? (
-            <div className="video-track-grid">
-              {completedTracks.map((track) => (
-                <button key={`${track.id}-${track.track_id}`} className={selected?.id === track.id ? 'video-track-card selected' : 'video-track-card'} onClick={() => {
-                  setSelected(track)
-                  setCurrentTimeMs(track.keyframes?.[0]?.timestamp_ms ?? track.start_ms)
-                }}>
-                  <div className="video-track-thumb">
-                    {track.frame_url ? <img src={track.frame_url} alt={displayName(track)} /> : <ImageIcon />}
-                    <span>{((track.keyframes?.[0]?.timestamp_ms ?? track.start_ms) / 1000).toFixed(1)}s</span>
-                  </div>
-                  <div>
-                    <strong>{displayName(track)}</strong>
-                    <p>{categoryLabel(track.category)} · 置信度 {Math.round(track.confidence * 100)}% · {track.source}</p>
-                  </div>
-                </button>
-              ))}
-            </div>
+            <>
+              <div className="video-track-grid">
+                {completedTracks.map((track) => (
+                  <button key={`${track.id}-${track.track_id}`} className={selected?.id === track.id ? 'video-track-card selected' : 'video-track-card'} onClick={() => {
+                    setSelected(track)
+                    setCurrentTimeMs(track.keyframes?.[0]?.timestamp_ms ?? track.start_ms)
+                  }}>
+                    <div className="video-track-thumb">
+                      {track.frame_url ? <img src={track.frame_url} alt={displayName(track)} /> : <ImageIcon />}
+                      <span>{((track.keyframes?.[0]?.timestamp_ms ?? track.start_ms) / 1000).toFixed(1)}s</span>
+                    </div>
+                    <div>
+                      <strong>{displayName(track)}</strong>
+                      <p>{categoryLabel(track.category)} · 置信度 {Math.round(track.confidence * 100)}% · {track.source}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+              <div className="pager-row pager-row-wide">
+                <button className="ghost-btn" disabled={trackPage <= 1} onClick={() => setTrackPage((page) => Math.max(1, page - 1))}>上一页</button>
+                <span>{trackPage} / {Math.max(1, Math.ceil(trackTotal / TRACK_PAGE_SIZE))}</span>
+                <button className="ghost-btn" disabled={!trackHasMore} onClick={() => setTrackPage((page) => page + 1)}>下一页</button>
+              </div>
+            </>
           ) : (
             <div className="empty-state">这个视频还没有可展示的目标帧。可以换更清晰、更近的真实动物/植物视频再试。</div>
           )}

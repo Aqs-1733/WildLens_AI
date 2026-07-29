@@ -25,7 +25,7 @@ from backend.models import (
     now_utc,
 )
 from backend.services.ai import ark_ai
-from backend.services.taxon_names import normalize_category
+from backend.services.taxon_names import localize_prediction, normalize_category
 from backend.services.video_transcode import (
     VideoTranscodeError,
     transcode_browser_video,
@@ -261,6 +261,162 @@ def _crop_jpeg(frame: np.ndarray, bbox: tuple[int, int, int, int]) -> bytes:
     crop = frame[max(0, y) : y + h, max(0, x) : x + w]
     ok, encoded = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
     return encoded.tobytes() if ok else b""
+
+
+def _context_crop_jpeg(
+    frame: np.ndarray,
+    bbox: tuple[int, int, int, int],
+    padding_ratio: float = 0.45,
+) -> bytes:
+    """Crop with surrounding context so video AI review sees the whole animal when possible."""
+    frame_height, frame_width = frame.shape[:2]
+    x, y, w, h = bbox
+    pad_x = int(w * padding_ratio)
+    pad_y = int(h * padding_ratio)
+    x1 = max(0, x - pad_x)
+    y1 = max(0, y - pad_y)
+    x2 = min(frame_width, x + w + pad_x)
+    y2 = min(frame_height, y + h + pad_y)
+    if x2 <= x1 or y2 <= y1:
+        return _crop_jpeg(frame, bbox)
+    crop = frame[y1:y2, x1:x2]
+    ok, encoded = cv2.imencode(".jpg", crop, [int(cv2.IMWRITE_JPEG_QUALITY), 88])
+    return encoded.tobytes() if ok else _crop_jpeg(frame, bbox)
+
+
+def _result_confidence(result: dict[str, Any] | None) -> float:
+    try:
+        return float((result or {}).get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _unresolved_text(value: Any) -> bool:
+    text = str(value or "").strip().lower()
+    if not text:
+        return True
+    markers = (
+        "待确认",
+        "未确定",
+        "低置信度",
+        "不确定",
+        "无法确定",
+        "unknown",
+        "unresolved",
+        "no cv",
+        "blank",
+    )
+    return any(marker in text for marker in markers)
+
+
+def _usable_ai_video_result(result: dict[str, Any] | None) -> bool:
+    if not result:
+        return False
+    source = str(result.get("model_source") or result.get("source") or "").lower()
+    if "ark" not in source and "ai" not in source:
+        return False
+    confidence = _result_confidence(result)
+    name = result.get("common_name") or result.get("label") or result.get("scientific_name")
+    return confidence >= 0.55 and not _unresolved_text(name)
+
+
+def _weak_bioclip_video_result(result: dict[str, Any] | None) -> bool:
+    if not result:
+        return False
+    if bool(result.get("bioclip_is_weak")):
+        return True
+    similarity = float(result.get("bioclip_similarity") or 0.0)
+    margin = float(result.get("bioclip_top1_margin") or 0.0)
+    support = int(result.get("prototype_image_count") or 0)
+    return (
+        similarity < max(float(settings.bioclip_min_similarity), 0.62)
+        or margin < max(float(settings.bioclip_min_margin), 0.02)
+        or support < 2
+    )
+
+
+def _prefer_ai_video_result(
+    *,
+    ai_result: dict[str, Any] | None,
+    bioclip_result: dict[str, Any] | None,
+    fused_result: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not _usable_ai_video_result(ai_result) or not _weak_bioclip_video_result(bioclip_result):
+        return None
+    ai_confidence = _result_confidence(ai_result)
+    fused_confidence = _result_confidence(fused_result)
+    if ai_confidence + 0.08 < min(fused_confidence, 0.72):
+        return None
+    output = dict(ai_result or {})
+    common_name = str(output.get("common_name") or output.get("label") or "").strip()
+    if "（" in common_name:
+        common_name = common_name.split("（", 1)[0].strip()
+    if "(" in common_name:
+        common_name = common_name.split("(", 1)[0].strip()
+    if common_name:
+        output["common_name"] = common_name
+        output["label"] = common_name
+    output["confidence"] = max(ai_confidence, min(fused_confidence, 0.68))
+    output["model_source"] = "ark+bioclip-weak-review"
+    output["fusion_status"] = "ai_corrected"
+    output["fusion_decision"] = "ai_corrected"
+    output["fusion_reason"] = (
+        "ARK vision review provided a clearer visible-species candidate than the weak BioCLIP video-frame prototype match."
+    )
+    alternatives = list(output.get("alternatives") or [])
+    if bioclip_result:
+        alternatives.append(
+            {
+                "name": bioclip_result.get("common_name") or bioclip_result.get("scientific_name"),
+                "scientific_name": bioclip_result.get("scientific_name") or "",
+                "confidence": bioclip_result.get("confidence") or bioclip_result.get("bioclip_similarity") or 0.0,
+                "source": "weak_bioclip_candidate",
+            }
+        )
+    output["alternatives"] = alternatives[:5]
+    evidence = list(output.get("evidence") or [])
+    evidence.append(
+        {
+            "kind": "ai_video_override",
+            "reason": "weak_bioclip_video_candidate",
+            "ai_confidence": round(ai_confidence, 6),
+            "bioclip_similarity": (bioclip_result or {}).get("bioclip_similarity"),
+            "bioclip_top1_margin": (bioclip_result or {}).get("bioclip_top1_margin"),
+        }
+    )
+    output["evidence"] = evidence
+    return output
+
+
+def _has_reliable_speciesnet_animal_evidence(result: dict[str, Any] | None) -> bool:
+    if not result:
+        return False
+    if str(result.get("scientific_name") or "").strip():
+        return True
+    for item in result.get("detections") or []:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or item.get("category") or "").strip().lower()
+        try:
+            confidence = float(item.get("conf") or item.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        if label == "animal" and confidence >= 0.20:
+            return True
+    return False
+
+
+def _skip_unverified_weak_video_species(
+    *,
+    result: dict[str, Any] | None,
+    bioclip_result: dict[str, Any] | None,
+    speciesnet_result: dict[str, Any] | None,
+) -> bool:
+    if not _weak_bioclip_video_result(bioclip_result):
+        return False
+    if _usable_ai_video_result(result):
+        return False
+    return not _has_reliable_speciesnet_animal_evidence(speciesnet_result)
 
 
 def _speciesnet_detection_candidates(
@@ -607,6 +763,10 @@ async def process_job(job_id: int) -> None:
                 crop_bgr = frame[max(0, y) : y2, max(0, x) : x2]
                 crop_bytes = _crop_jpeg(frame, candidate.bbox)
                 crop_hash = hashlib.sha1(crop_bytes).hexdigest()[:12] if crop_bytes else ""
+                ai_image_bytes = _context_crop_jpeg(frame, candidate.bbox) or crop_bytes
+                ai_image_hash = (
+                    hashlib.sha1(ai_image_bytes).hexdigest()[:12] if ai_image_bytes else crop_hash
+                )
 
                 biological_categories = {
                     "unknown",
@@ -703,12 +863,19 @@ async def process_job(job_id: int) -> None:
                 if (
                     ark_ai.vision_enabled
                     and (not result or result.get("model_source") == "onnx-unknown")
-                    and crop_bytes
-                    and crop_hash not in seen_hashes
+                    and ai_image_bytes
+                    and ai_image_hash not in seen_hashes
                     and ai_calls < max_ai_calls
                 ):
-                    seen_hashes.add(crop_hash)
-                    ark_result = await ark_ai.classify_image(crop_bytes, hint=candidate.category)
+                    seen_hashes.add(ai_image_hash)
+                    ark_result = await ark_ai.classify_image(
+                        ai_image_bytes,
+                        hint=(
+                            f"video frame target={candidate.category}. "
+                            "Return the most specific visible species or concrete Chinese animal/plant name; "
+                            "do not use pending/unconfirmed placeholders."
+                        ),
+                    )
                     ai_calls += 1
                     if ark_result:
                         if result and result.get("alternatives"):
@@ -773,6 +940,14 @@ async def process_job(job_id: int) -> None:
                 )
                 fused = fusion.get("result") if isinstance(fusion.get("result"), dict) else None
                 if fused:
+                    ai_override = _prefer_ai_video_result(
+                        ai_result=result,
+                        bioclip_result=bioclip_result,
+                        fused_result=fused,
+                    )
+                    if ai_override:
+                        fused = ai_override
+                        ai_correction_used += 1
                     fused = _downgrade_unreliable_video_species(
                         fused=fused,
                         fusion=fusion,
@@ -784,7 +959,7 @@ async def process_job(job_id: int) -> None:
                         not skip_ai_correction
                         and settings.ai_correction_enabled
                         and ai_calls < max_ai_calls
-                        and crop_hash not in seen_hashes
+                        and ai_image_hash not in seen_hashes
                         and needs_ai_correction(
                             result=fused,
                             fusion=fusion,
@@ -793,14 +968,17 @@ async def process_job(job_id: int) -> None:
                             statuses=settings.ai_correction_status_set,
                         )
                     ):
-                        if ark_ai.vision_enabled and crop_bytes:
-                            seen_hashes.add(crop_hash)
+                        if ark_ai.vision_enabled and (ai_image_bytes or crop_bytes):
+                            seen_hashes.add(ai_image_hash)
                             ai_corrected = await ark_ai.classify_image(
-                                crop_bytes,
-                                hint=correction_hint(
-                                    category=candidate.category,
-                                    result=fused,
-                                    fusion=fusion,
+                                ai_image_bytes or crop_bytes,
+                                hint=(
+                                    correction_hint(
+                                        category=candidate.category,
+                                        result=fused,
+                                        fusion=fusion,
+                                    )
+                                    + " Return the best concrete Chinese result; avoid pending/unconfirmed placeholders."
                                 ),
                             )
                             if ai_corrected:
@@ -842,7 +1020,7 @@ async def process_job(job_id: int) -> None:
                             ai_correction_warnings.add(
                                 "AI correction skipped because ARK_API_KEY is not configured."
                             )
-                    result = fused
+                    result = localize_prediction(db, fused)
                     result["evidence"] = list(result.get("evidence") or []) + [
                         _model_evidence_item(
                             fusion,
@@ -851,6 +1029,16 @@ async def process_job(job_id: int) -> None:
                     ]
                     if fusion.get("warnings"):
                         speciesnet_warnings.update(str(item) for item in fusion["warnings"])
+
+                if _skip_unverified_weak_video_species(
+                    result=result,
+                    bioclip_result=bioclip_result,
+                    speciesnet_result=speciesnet_result,
+                ):
+                    bioclip_warnings.add(
+                        "Weak BioCLIP video-frame species candidate skipped because neither AI review nor SpeciesNet supplied reliable animal evidence."
+                    )
+                    continue
 
                 category = normalize_category(result.get("category") or candidate.category or "unknown")
                 if category == "unknown" and candidate.category == "plant":

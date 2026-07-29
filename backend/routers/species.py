@@ -3,11 +3,12 @@ from __future__ import annotations
 import logging
 import threading
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.core.database import SessionLocal, get_db
+from backend.core.pagination import paginate_scalars
 from backend.deps import get_current_user
 from backend.models import (
     AnalysisJob,
@@ -76,10 +77,13 @@ def _queue_species_profile_refresh(species_id: int) -> None:
 
 @router.get("", response_model=list[SpeciesOut])
 def list_species(
+    response: Response,
     q: str = "",
     category: str = "",
     protection: str = "",
     mine: bool = False,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=60, ge=1, le=200),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[Species]:
@@ -99,7 +103,16 @@ def list_species(
         stmt = stmt.where(Species.category == category)
     if protection:
         stmt = stmt.where(Species.protection_level.contains(protection))
-    return list(db.scalars(stmt.order_by(Species.rarity.desc(), Species.id)).all())
+    return list(
+        paginate_scalars(
+            db,
+            stmt.order_by(Species.rarity.desc(), Species.id),
+            response=response,
+            page=page,
+            limit=limit,
+            max_limit=200,
+        )
+    )
 
 
 @router.get("/search", response_model=list[SpeciesOut])
@@ -126,14 +139,22 @@ def search_species(
 
 @router.get("/collection", response_model=list[CollectionOut])
 def collection(
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=80, ge=1, le=200),
     db: Session = Depends(get_db), user: User = Depends(get_current_user)
 ) -> list[UserCollection]:
     return list(
-        db.scalars(
+        paginate_scalars(
+            db,
             select(UserCollection)
             .where(UserCollection.user_id == user.id)
-            .order_by(UserCollection.last_discovered_at.desc())
-        ).all()
+            .order_by(UserCollection.last_discovered_at.desc()),
+            response=response,
+            page=page,
+            limit=limit,
+            max_limit=200,
+        )
     )
 
 

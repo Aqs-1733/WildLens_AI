@@ -6,12 +6,13 @@ import uuid
 from pathlib import Path
 
 import cv2
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.core.config import get_settings
 from backend.core.database import get_db
+from backend.core.pagination import add_pagination_headers, page_window, paginate_scalars
 from backend.deps import get_current_user
 from backend.models import (
     AnalysisJob,
@@ -789,8 +790,10 @@ def save_observation(
 
 @router.get("/history", response_model=list[DiscoveryOut])
 def history(
+    response: Response,
     record_type: str = "",
-    limit: int = 80,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=80, ge=1, le=200),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[DiscoveryRecord]:
@@ -798,9 +801,14 @@ def history(
     if record_type:
         stmt = stmt.where(DiscoveryRecord.record_type == record_type)
     records = list(
-        db.scalars(
-            stmt.order_by(DiscoveryRecord.created_at.desc()).limit(max(1, min(limit, 200)))
-        ).all()
+        paginate_scalars(
+            db,
+            stmt.order_by(DiscoveryRecord.created_at.desc()),
+            response=response,
+            page=page,
+            limit=limit,
+            max_limit=200,
+        )
     )
     for record in records:
         record.title = record.phenomenon or record.behavior or resolve_chinese_name(
@@ -811,7 +819,10 @@ def history(
 
 @router.get("/observations/map")
 def observation_map(
+    response: Response,
     layer: str = "animal",
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=300, ge=1, le=1000),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
@@ -820,14 +831,19 @@ def observation_map(
         category_set = PLANT_CATEGORIES
     elif layer == "phenomenon":
         category_set = PHENOMENON_CATEGORIES
-    rows = db.execute(
+    base = (
         select(DiscoveryRecord, ObservationLocation)
         .join(ObservationLocation, ObservationLocation.discovery_id == DiscoveryRecord.id)
         .where(
             DiscoveryRecord.user_id == user.id,
             DiscoveryRecord.category.in_(category_set),
         )
-        .order_by(DiscoveryRecord.created_at.desc())
+    )
+    safe_page, safe_limit, offset = page_window(page, limit, max_limit=1000)
+    total = db.scalar(select(func.count()).select_from(base.order_by(None).subquery())) or 0
+    add_pagination_headers(response, total=int(total), page=safe_page, limit=safe_limit)
+    rows = db.execute(
+        base.order_by(DiscoveryRecord.created_at.desc()).limit(safe_limit).offset(offset)
     ).all()
     payload = []
     for record, location in rows:
@@ -842,6 +858,7 @@ def observation_map(
                 "category": normalize_category(record.category),
                 "image_url": record.image_url,
                 "confidence": record.confidence,
+                "description": record.note or "",
                 "behavior": record.behavior,
                 "phenomenon": record.phenomenon,
                 "observed_at": location.observed_at,

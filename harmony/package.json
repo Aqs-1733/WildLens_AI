@@ -1,0 +1,18 @@
+{
+  "name": "shijing-harmony-group20",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Group 20 OpenHarmony client for Shijing.",
+  "ohos": {
+    "org": "huawei",
+    "buildTool": "hvigor",
+    "directoryLevel": "project"
+  },
+  "scripts": {
+    "build:hap": "hvigor assembleHap"
+  },
+  "dependencies": {
+    "@ohos/hvigor": "3.2.4",
+    "@ohos/hvigor-ohos-plugin": "3.2.4"
+  }
+}

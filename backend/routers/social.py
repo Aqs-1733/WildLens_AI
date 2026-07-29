@@ -3,12 +3,13 @@ from __future__ import annotations
 import mimetypes
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from backend.core.config import get_settings
 from backend.core.database import get_db
+from backend.core.pagination import paginate_scalars
 from backend.deps import get_current_user
 from backend.models import (
     ChatMessage,
@@ -229,7 +230,13 @@ def remove_friend(
 
 
 @router.get("/feed")
-def feed(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+def feed(
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=30, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
     friendships = db.scalars(
         select(Friendship).where(
             Friendship.status == "accepted",
@@ -241,7 +248,8 @@ def feed(db: Session = Depends(get_db), user: User = Depends(get_current_user)) 
         for item in friendships
     }
     allowed_ids = friend_ids | {user.id}
-    posts = db.scalars(
+    posts = paginate_scalars(
+        db,
         select(ObservationPost)
         .where(
             or_(
@@ -250,9 +258,11 @@ def feed(db: Session = Depends(get_db), user: User = Depends(get_current_user)) 
                 ObservationPost.author_id == user.id,
             )
         )
-        .order_by(ObservationPost.created_at.desc())
-        .limit(50)
-    ).all()
+        .order_by(ObservationPost.created_at.desc()),
+        response=response,
+        page=page,
+        limit=limit,
+    )
     output = []
     for post in posts:
         author = db.get(User, post.author_id)
@@ -307,6 +317,7 @@ def feed(db: Session = Depends(get_db), user: User = Depends(get_current_user)) 
 @router.get("/feed/recommendations")
 def recommended_feed(
     refresh: int = 0,
+    candidate_limit: int = Query(default=200, ge=20, le=500),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
@@ -319,7 +330,7 @@ def recommended_feed(
         select(ObservationPost)
         .where(ObservationPost.visibility == "public", ObservationPost.author_id != user.id)
         .order_by(ObservationPost.created_at.desc())
-        .limit(200)
+        .limit(candidate_limit)
     ).all()
     ranked: list[tuple[int, ObservationPost]] = []
     for index, post in enumerate(posts):
@@ -477,13 +488,22 @@ def create_comment(
 
 
 @router.get("/notifications")
-def notifications(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
-    items = db.scalars(
+def notifications(
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
+    items = paginate_scalars(
+        db,
         select(Notification)
         .where(Notification.user_id == user.id)
-        .order_by(Notification.created_at.desc())
-        .limit(80)
-    ).all()
+        .order_by(Notification.created_at.desc()),
+        response=response,
+        page=page,
+        limit=limit,
+    )
     return [
         {
             "id": item.id,
@@ -577,18 +597,25 @@ def create_chat(
 @router.get("/chats/{thread_id}/messages")
 def chat_messages(
     thread_id: int,
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=100, ge=1, le=300),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     thread = db.get(ChatThread, thread_id)
     if not thread or user.id not in _thread_member_ids(thread):
         raise HTTPException(status_code=404, detail="聊天不存在")
-    messages = db.scalars(
+    messages = paginate_scalars(
+        db,
         select(ChatMessage)
         .where(ChatMessage.thread_id == thread.id)
-        .order_by(ChatMessage.created_at)
-        .limit(300)
-    ).all()
+        .order_by(ChatMessage.created_at),
+        response=response,
+        page=page,
+        limit=limit,
+        max_limit=300,
+    )
     return [
         {
             "id": item.id,

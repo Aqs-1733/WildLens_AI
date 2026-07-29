@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "app_name",
+      "value": "识境"
+    },
+    {
+      "name": "module_desc",
+      "value": "识境鸿蒙客户端"
+    },
+    {
+      "name": "entry_desc",
+      "value": "识境自然观察识别"
+    },
+    {
+      "name": "permission_internet_reason",
+      "value": "连接组20后端服务，完成登录、图片上传和识别结果获取。"
+    }
+  ]
+}

@@ -51,6 +51,42 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
   return response as unknown as T
 }
 
+export type PaginationMeta = {
+  total: number
+  page: number
+  limit: number
+  hasMore: boolean
+}
+
+export async function apiPage<T>(path: string, options: RequestInit = {}): Promise<{ items: T; meta: PaginationMeta }> {
+  const headers = new Headers(options.headers)
+  Object.entries(authHeaders()).forEach(([key, value]) => headers.set(key, String(value)))
+  if (!(options.body instanceof FormData) && !headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+  const response = await fetch(`${getApiBase()}${path}`, { ...options, headers })
+  if (!response.ok) {
+    let message = `请求失败（${response.status}）`
+    try {
+      const data = await response.json()
+      message = data.detail || data.message || message
+    } catch {
+      // non-JSON error
+    }
+    throw new ApiError(response.status, message)
+  }
+  const items = await response.json() as T
+  return {
+    items,
+    meta: {
+      total: Number(response.headers.get('x-total-count') || 0),
+      page: Number(response.headers.get('x-page') || 1),
+      limit: Number(response.headers.get('x-limit') || 30),
+      hasMore: response.headers.get('x-has-more') === 'true',
+    },
+  }
+}
+
 export function mediaUrl(url: string): string {
   if (!url) return ''
   if (url.startsWith('http://') || url.startsWith('https://') || url.startsWith('blob:')) return url

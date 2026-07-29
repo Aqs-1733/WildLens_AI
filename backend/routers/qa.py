@@ -5,12 +5,13 @@ import re
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Response, UploadFile
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.core.database import get_db
 from backend.core.config import get_settings
+from backend.core.pagination import paginate_scalars
 from backend.deps import get_current_user
 from backend.models import (
     Detection,
@@ -79,15 +80,21 @@ async def upload_attachment(
 
 @router.get("/conversations", response_model=list[QAConversationOut])
 def conversations(
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=100),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
-    rows = db.scalars(
+    rows = paginate_scalars(
+        db,
         select(QAConversation)
         .where(QAConversation.user_id == user.id)
-        .order_by(QAConversation.created_at.desc())
-        .limit(100)
-    ).all()
+        .order_by(QAConversation.created_at.desc()),
+        response=response,
+        page=page,
+        limit=limit,
+    )
     output = []
     for item in rows:
         last_at = db.scalar(
@@ -130,6 +137,9 @@ def new_conversation(
 @router.get("/conversations/{conversation_id}/messages", response_model=list[QAMessageOut])
 def conversation_messages(
     conversation_id: int,
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=100, ge=1, le=300),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[QAMessage]:
@@ -137,11 +147,16 @@ def conversation_messages(
     if not conversation or conversation.user_id != user.id:
         raise HTTPException(status_code=404, detail="聊天记录不存在")
     return list(
-        db.scalars(
+        paginate_scalars(
+            db,
             select(QAMessage)
             .where(QAMessage.conversation_id == conversation.id)
-            .order_by(QAMessage.created_at)
-        ).all()
+            .order_by(QAMessage.created_at),
+            response=response,
+            page=page,
+            limit=limit,
+            max_limit=300,
+        )
     )
 
 

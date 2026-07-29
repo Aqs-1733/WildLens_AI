@@ -1,7 +1,9 @@
 {
   "active_species_model": null,
+  "active_detector_model": "./models/trained/wildlens_yolo26s_mammal_bird_v5.onnx",
   "prototype_database": "./storage/species_visual_embeddings.sqlite",
   "global_species_index": "./models/metadata/global_species_index",
   "fallback_model": "hf-hub:imageomics/bioclip",
-  "updated_at": null
+  "runtime": "onnxruntime-cpu",
+  "updated_at": "2026-07-29"
 }

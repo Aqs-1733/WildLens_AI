@@ -1,0 +1,3 @@
+China outline is derived from Natural Earth low-resolution country boundaries.
+Natural Earth data are public domain: https://www.naturalearthdata.com/about/terms-of-use/
+The application displays this outline only as a general observation-distribution backdrop and does not use it for surveying or administrative decisions.

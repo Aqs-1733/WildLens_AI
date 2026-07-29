@@ -1,25 +1,34 @@
 import { useEffect, useMemo, useState } from 'react'
 import { AlertOctagon, CheckCircle2, Filter, ShieldAlert } from 'lucide-react'
-import { api } from '../api/client'
+import { api, apiPage, mediaUrl } from '../api/client'
 import { useAuth } from '../context/AuthContext'
 import type { AlertEvent } from '../types'
 
 const severityText: Record<string, string> = { high: '高风险', medium: '中风险', low: '低风险' }
 const statusText: Record<string, string> = { pending: '待处理', processing: '处理中', confirmed: '已确认', dismissed: '已排除' }
+const PAGE_SIZE = 10
 
 export default function AlertsPage() {
   const { user } = useAuth()
   const [items, setItems] = useState<AlertEvent[]>([])
   const [status, setStatus] = useState('all')
   const [error, setError] = useState('')
+  const [page, setPage] = useState(1)
+  const [total, setTotal] = useState(0)
+  const [hasMore, setHasMore] = useState(false)
   const canReview = user?.role === 'regulator' || user?.role === 'admin'
-  const load = () => api<AlertEvent[]>('/api/alerts').then((rows) => { setItems(rows); setError('') }).catch((err: Error) => setError(err.message))
-  useEffect(() => { void load() }, [])
+  const load = (nextPage = page) => apiPage<AlertEvent[]>(`/api/alerts?page=${nextPage}&limit=${PAGE_SIZE}`).then(({ items: rows, meta }) => {
+    setItems(rows)
+    setTotal(meta.total)
+    setHasMore(meta.hasMore)
+    setError('')
+  }).catch((err: Error) => setError(err.message))
+  useEffect(() => { void load(page) }, [page])
   const visible = useMemo(() => status === 'all' ? items : items.filter((item) => item.status === status), [items, status])
   const review = async (id: number, next: string) => {
     if (!canReview) return
     await api(`/api/alerts/${id}`, { method: 'PATCH', body: JSON.stringify({ status: next, note: '网页端复核' }) })
-    await load()
+    await load(page)
   }
 
   return (
@@ -35,7 +44,7 @@ export default function AlertsPage() {
           <div className="table-row table-head"><span>事件</span><span>等级</span><span>置信度</span><span>发生时间</span><span>状态</span><span>操作</span></div>
           {visible.map((item) => (
             <div className="table-row" key={item.id}>
-              <span className="table-title"><AlertOctagon /><div><strong>{item.title}</strong><small>{item.description}</small>{item.ai_advice && <small>建议：{item.ai_advice}</small>}</div></span>
+              <span className="table-title"><AlertOctagon />{typeof item.evidence?.image_url === 'string' && item.evidence.image_url && <img className="alert-evidence-thumb" src={mediaUrl(item.evidence.image_url)} alt={item.title} />}<div><strong>{item.title}</strong><small>{item.description}</small>{item.ai_advice && <small>建议：{item.ai_advice}</small>}</div></span>
               <span className={`severity-pill severity-${item.severity}`}>{severityText[item.severity] || item.severity}</span>
               <span>{Math.round(item.confidence * 100)}%</span>
               <span>{item.timestamp_ms ? `${(item.timestamp_ms / 1000).toFixed(1)} 秒` : new Date(item.created_at).toLocaleString('zh-CN')}</span>
@@ -44,6 +53,11 @@ export default function AlertsPage() {
             </div>
           ))}
           {!visible.length && <div className="empty-state">暂无符合筛选条件的风险事件。</div>}
+        </div>
+        <div className="pager-row pager-row-wide">
+          <button className="ghost-btn" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}>上一页</button>
+          <span>第 {page} 页 / 共 {total} 条</span>
+          <button className="ghost-btn" disabled={!hasMore} onClick={() => setPage((value) => value + 1)}>下一页</button>
         </div>
       </section>
     </div>

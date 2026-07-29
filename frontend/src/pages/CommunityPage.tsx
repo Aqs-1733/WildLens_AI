@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Bell, CheckCircle2, Heart, ImagePlus, MessageCircle, RefreshCw, Search, Send, Trash2, UserPlus, Users, X } from 'lucide-react'
-import { api, mediaUrl } from '../api/client'
+import { api, apiPage, mediaUrl } from '../api/client'
 import type { Species } from '../types'
 import { cleanChineseDisplayName, localTaxonName } from '../utils/taxonNames'
 
@@ -11,6 +11,7 @@ interface FeedPost { id: number; author: Friend | null; species: { id: number; c
 interface Notice { id: number; title: string; body: string; read: boolean; created_at: string; actor?: Friend | null; payload: Record<string, unknown> }
 interface ChatThread { id: number; title: string; thread_type: string; members: Friend[]; last_message: string; updated_at: string }
 interface ChatMessage { id: number; sender: Friend | null; content: string; image_url: string; created_at: string }
+const FEED_PAGE_SIZE = 10
 
 function Avatar({ user }: { user?: Friend | null }) {
   if (user?.avatar_url) return <img className="avatar-circle avatar-image" src={user.avatar_url} alt={user.display_name} />
@@ -40,18 +41,21 @@ export default function CommunityPage() {
   const [chatText, setChatText] = useState('')
   const [groupTitle, setGroupTitle] = useState('')
   const [groupMembers, setGroupMembers] = useState<string[]>([])
+  const [feedPage, setFeedPage] = useState(1)
+  const [feedTotal, setFeedTotal] = useState(0)
+  const [feedHasMore, setFeedHasMore] = useState(false)
 
-  const load = () => Promise.all([
+  const load = (nextFeedPage = feedPage) => Promise.all([
     api<{ friends: Friend[]; pending: PendingFriend[] }>('/api/social/friends'),
-    api<FeedPost[]>('/api/social/feed'),
+    apiPage<FeedPost[]>(`/api/social/feed?page=${nextFeedPage}&limit=${FEED_PAGE_SIZE}`),
     api<FeedPost[]>(`/api/social/feed/recommendations?refresh=${refreshSeed}`),
     api<Notice[]>('/api/social/notifications'),
     api<Species[]>('/api/species?mine=true'),
     api<ChatThread[]>('/api/social/chats'),
-  ]).then(([friendData, posts, recs, noticeRows, speciesRows, chatRows]) => {
-    setFriends(friendData.friends); setPending(friendData.pending); setFeed(posts); setRecommended(recs); setNotices(noticeRows); setSpecies(speciesRows); setThreads(chatRows)
+  ]).then(([friendData, postsPage, recs, noticeRows, speciesRows, chatRows]) => {
+    setFriends(friendData.friends); setPending(friendData.pending); setFeed(postsPage.items); setFeedTotal(postsPage.meta.total); setFeedHasMore(postsPage.meta.hasMore); setRecommended(recs); setNotices(noticeRows); setSpecies(speciesRows); setThreads(chatRows)
   })
-  useEffect(() => { void load() }, [refreshSeed])
+  useEffect(() => { void load(feedPage) }, [refreshSeed, feedPage])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -73,7 +77,8 @@ export default function CommunityPage() {
     await api('/api/social/posts', { method: 'POST', body: JSON.stringify({ content, image_url: postImageUrl, species_id: speciesId ? Number(speciesId) : null, visibility }) })
     setContent('')
     setPostImageUrl('')
-    await load()
+    setFeedPage(1)
+    await load(1)
   }
   const uploadPostImage = async (file: File) => {
     setUploadingPostImage(true)
@@ -114,7 +119,7 @@ export default function CommunityPage() {
       <main>
         <section className="panel composer"><div className="composer-title"><Avatar/><div><strong>发布真实观察或自然想法</strong><span>可发布文字和图片；公开内容会进入所有人的社群流。</span></div></div><textarea value={content} onChange={(event) => setContent(event.target.value)} placeholder="今天发现了什么？学到了什么？"/>{postImageUrl && <div className="composer-preview"><img src={mediaUrl(postImageUrl)} alt="帖子图片预览"/><button onClick={() => setPostImageUrl('')}><X size={16}/></button></div>}<div className="composer-actions"><select value={speciesId} onChange={(event) => setSpeciesId(event.target.value)}><option value="">关联物种（可选）</option>{species.map((item) => <option key={item.id} value={item.id}>{cleanChineseDisplayName(localTaxonName({ label: item.common_name, scientificName: item.scientific_name, category: item.category }), item.common_name)}</option>)}</select><select value={visibility} onChange={(event) => setVisibility(event.target.value)}><option value="public">公开</option><option value="friends">好友可见</option><option value="private">仅自己</option></select><label className="ghost-btn upload-label"><ImagePlus/>{uploadingPostImage ? '上传中' : '添加图片'}<input type="file" accept="image/jpeg,image/png,image/webp" hidden onChange={(event) => event.target.files?.[0] && void uploadPostImage(event.target.files[0])}/></label><button className="primary-btn" onClick={() => void publish()}><Send/>发布</button></div></section>
         <section className="panel"><div className="panel-head"><div><span className="eyebrow">RECOMMENDED</span><h3>为你推荐 10 条真实动态</h3></div><RefreshCw onClick={() => setRefreshSeed((value) => value + 1)}/></div><div className="feed-list compact-feed">{recommended.map((post) => <FeedCard key={post.id} post={post} onLike={like}/>)}</div></section>
-        <section className="panel"><div className="history-toolbar"><label className="search-box"><Search/><input value={postQuery} onChange={(event) => setPostQuery(event.target.value)} placeholder="搜索所有可见动态"/></label></div><div className="feed-list">{filteredFeed.map((post) => <FeedCard key={post.id} post={post} onLike={like}/>)}</div></section>
+        <section className="panel"><div className="history-toolbar"><label className="search-box"><Search/><input value={postQuery} onChange={(event) => setPostQuery(event.target.value)} placeholder="搜索所有可见动态"/></label></div><div className="feed-list">{filteredFeed.map((post) => <FeedCard key={post.id} post={post} onLike={like}/>)}</div><div className="pager-row pager-row-wide"><button className="ghost-btn" disabled={feedPage <= 1} onClick={() => setFeedPage((value) => Math.max(1, value - 1))}>上一页</button><span>第 {feedPage} 页 / 共 {feedTotal} 条</span><button className="ghost-btn" disabled={!feedHasMore} onClick={() => setFeedPage((value) => value + 1)}>下一页</button></div></section>
       </main>
       <aside className="panel friends-panel"><div className="panel-head"><div><span className="eyebrow">PEOPLE</span><h3>好友与聊天</h3></div><Users/></div>
         <div className="friend-add"><input value={username} onChange={(event) => setUsername(event.target.value)} placeholder="输入用户名添加好友"/><button className="ghost-btn" onClick={() => void requestFriend()}><UserPlus/></button></div>
@@ -158,6 +163,8 @@ function FeedCard({ post, onLike }: { post: FeedPost; onLike: (id: number) => Pr
     }
   }
 
+  const previewComments = commentsOpen ? [] : comments.slice(0, 2)
+
   return <article className="feed-card">
     <div className="feed-head"><Avatar user={post.author}/><div><strong>{post.author?.display_name || '未知用户'}</strong><span>Lv.{post.author?.level ?? 1} · {post.author?.badges?.join(' / ') || '探索者'} · {new Date(post.created_at).toLocaleString('zh-CN')}</span></div></div>
     {post.species && <div className="post-species" style={{ borderColor: post.species.color }}><span style={{ background: post.species.color }}/>{cleanChineseDisplayName(localTaxonName({ label: post.species.common_name, scientificName: post.species.scientific_name }), post.species.common_name)}</div>}
@@ -168,6 +175,7 @@ function FeedCard({ post, onLike }: { post: FeedPost; onLike: (id: number) => Pr
       <button className={post.liked_by_me ? 'liked' : ''} onClick={() => void onLike(post.id)}><Heart fill={post.liked_by_me ? 'currentColor' : 'none'}/> {post.likes}</button>
       <button onClick={() => void toggleComments()}><MessageCircle/> {commentsOpen ? '收起评论' : `评论 ${Math.max(post.comment_count, comments.length)}`}</button>
     </div>
+    {previewComments.length > 0 && <div className="comment-preview-list">{previewComments.map((item) => <div key={item.id}><strong>{item.author?.display_name || '用户'}：</strong>{item.content}</div>)}</div>}
     {commentsOpen && <div className="comment-box">
       <div className="comment-list">{comments.length ? comments.map((item) => <div key={item.id} className="comment-row"><Avatar user={item.author}/><div><strong>{item.author?.display_name || '用户'}</strong><p>{item.content}</p><span>{new Date(item.created_at).toLocaleString('zh-CN')}</span></div></div>) : <span className="empty-inline">还没有评论，来写第一条。</span>}</div>
       <div className="comment-input"><input value={commentText} onChange={(event) => setCommentText(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') void sendComment() }} placeholder="写下你的观察或补充"/><button disabled={sending || !commentText.trim()} onClick={() => void sendComment()}><Send/></button></div>

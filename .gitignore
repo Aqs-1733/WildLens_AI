@@ -28,10 +28,22 @@ htmlcov/
 # ======================
 frontend/node_modules/
 frontend/dist/
+frontend/dist-harmony/
 frontend/.vite/
+frontend/android/.gradle/
+frontend/android/build/
+frontend/android/app/build/
 *.tsbuildinfo
 /dist/
 /outputs/
+
+# ======================
+# Harmony
+# ======================
+harmony/node_modules/
+harmony/.hvigor/
+harmony/local.properties
+harmony/**/build/
 
 
 # ======================

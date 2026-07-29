@@ -8,23 +8,31 @@ PROJECT_DIR = Path(__file__).resolve().parents[1]
 if str(PROJECT_DIR) not in sys.path:
     sys.path.insert(0, str(PROJECT_DIR))
 
+import json
 import logging
+import re
 import time
 import uuid
 from contextlib import asynccontextmanager
+from datetime import datetime
 
 import uvicorn
 from fastapi import FastAPI, Request
+from fastapi.encoders import ENCODERS_BY_TYPE
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from backend.core.config import get_settings
 from backend.core.database import Base, SessionLocal, engine
+from backend.core.time_utils import beijing_isoformat
 from backend.routers import alerts, auth, compat, dashboard, identify, qa, reports, review, social, species, system, videos
 from backend.seed import seed_database
 from backend.vision.bioclip_classifier import bioclip_classifier
 
 settings = get_settings()
+ENCODERS_BY_TYPE[datetime] = beijing_isoformat
+ISO_NAIVE_DATETIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?$")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -34,6 +42,50 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("wildlens.api")
+
+
+def _normalize_datetime_strings(value):
+    if isinstance(value, str) and ISO_NAIVE_DATETIME.match(value):
+        return beijing_isoformat(datetime.fromisoformat(value))
+    if isinstance(value, list):
+        return [_normalize_datetime_strings(item) for item in value]
+    if isinstance(value, dict):
+        return {key: _normalize_datetime_strings(item) for key, item in value.items()}
+    return value
+
+
+async def _with_beijing_json_datetimes(response: Response) -> Response:
+    if response.status_code in {204, 304}:
+        return response
+    content_type = response.headers.get("content-type", "")
+    if not content_type.startswith("application/json"):
+        return response
+    body = b"".join([chunk async for chunk in response.body_iterator])
+    if not body:
+        return response
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        return Response(
+            content=body,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+            background=response.background,
+        )
+    headers = dict(response.headers)
+    headers.pop("content-length", None)
+    return Response(
+        content=json.dumps(
+            _normalize_datetime_strings(payload),
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode("utf-8"),
+        status_code=response.status_code,
+        headers=headers,
+        media_type="application/json",
+        background=response.background,
+    )
 
 
 @asynccontextmanager
@@ -77,6 +129,7 @@ async def request_id_middleware(request: Request, call_next):
             request.url.path,
         )
         raise
+    response = await _with_beijing_json_datetimes(response)
     duration_ms = round((time.perf_counter() - started) * 1000, 2)
     response.headers["X-Request-ID"] = request_id
     logger.info(

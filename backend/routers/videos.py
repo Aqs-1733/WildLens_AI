@@ -4,12 +4,13 @@ import uuid
 from pathlib import Path
 
 import cv2
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.core.config import get_settings
 from backend.core.database import get_db
+from backend.core.pagination import paginate_scalars
 from backend.deps import get_current_user
 from backend.models import (
     AnalysisJob,
@@ -158,11 +159,18 @@ def _job_dict(db: Session, item: AnalysisJob) -> dict:
 
 
 @router.get("/jobs")
-def list_jobs(db: Session = Depends(get_db), user: User = Depends(get_current_user)) -> list[dict]:
+def list_jobs(
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=30, ge=1, le=100),
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> list[dict]:
     stmt = select(AnalysisJob).order_by(AnalysisJob.id.desc())
     if user.role == "public":
         stmt = stmt.where(AnalysisJob.owner_id == user.id)
-    return [_job_dict(db, item) for item in db.scalars(stmt).all()]
+    items = paginate_scalars(db, stmt, response=response, page=page, limit=limit)
+    return [_job_dict(db, item) for item in items]
 
 
 @router.get("/jobs/{job_id}")
@@ -237,13 +245,23 @@ def get_job_frame(
 @router.get("/jobs/{job_id}/detections")
 def get_detections(
     job_id: int,
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     job = db.get(AnalysisJob, job_id)
     if not job or (user.role == "public" and job.owner_id != user.id):
         raise HTTPException(status_code=404, detail="任务不存在")
-    items = db.scalars(select(Detection).where(Detection.job_id == job_id).order_by(Detection.timestamp_ms)).all()
+    items = paginate_scalars(
+        db,
+        select(Detection).where(Detection.job_id == job_id).order_by(Detection.timestamp_ms),
+        response=response,
+        page=page,
+        limit=limit,
+        max_limit=500,
+    )
     rows = []
     for item in items:
         metadata = _model_metadata(item.evidence or [])
@@ -284,13 +302,23 @@ def get_detections(
 @router.get("/jobs/{job_id}/tracks")
 def get_tracks(
     job_id: int,
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=80, ge=1, le=300),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     job = db.get(AnalysisJob, job_id)
     if not job or (user.role == "public" and job.owner_id != user.id):
         raise HTTPException(status_code=404, detail="任务不存在")
-    tracks = db.scalars(select(VideoTrack).where(VideoTrack.job_id == job_id).order_by(VideoTrack.track_id)).all()
+    tracks = paginate_scalars(
+        db,
+        select(VideoTrack).where(VideoTrack.job_id == job_id).order_by(VideoTrack.track_id),
+        response=response,
+        page=page,
+        limit=limit,
+        max_limit=300,
+    )
     if not tracks:
         detections = db.scalars(
             select(Detection).where(Detection.job_id == job_id).order_by(Detection.track_id, Detection.timestamp_ms)
@@ -371,13 +399,23 @@ def get_tracks(
 @router.get("/jobs/{job_id}/events")
 def get_events(
     job_id: int,
+    response: Response,
+    page: int = Query(default=1, ge=1),
+    limit: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> list[dict]:
     job = db.get(AnalysisJob, job_id)
     if not job or (user.role == "public" and job.owner_id != user.id):
         raise HTTPException(status_code=404, detail="任务不存在")
-    events = db.scalars(select(RiskEvent).where(RiskEvent.job_id == job_id).order_by(RiskEvent.timestamp_ms)).all()
+    events = paginate_scalars(
+        db,
+        select(RiskEvent).where(RiskEvent.job_id == job_id).order_by(RiskEvent.timestamp_ms),
+        response=response,
+        page=page,
+        limit=limit,
+        max_limit=200,
+    )
     return [
         {
             "id": item.id,

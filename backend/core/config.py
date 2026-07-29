@@ -52,8 +52,8 @@ class Settings(BaseSettings):
     ark_image_model: str = "doubao-seed-evolving"
     ai_correction_enabled: bool = True
     ai_correction_min_confidence: float = 0.62
-    ai_correction_statuses: str = "unknown,fallback"
-    video_ai_max_calls: int = 1
+    ai_correction_statuses: str = "unknown,fallback,review"
+    video_ai_max_calls: int = 3
 
     langchain_tracing_v2: bool = False
     langchain_api_key: str = ""
@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     ffmpeg_crf: int = 23
     ffmpeg_timeout_seconds: int = 1800
     vision_mode: str = "hybrid"
-    yolo_model_path: str = "./models/pretrained/yolo11n.onnx"
+    yolo_model_path: str = "./models/trained/wildlens_yolo26s_mammal_bird_v5.onnx"
     custom_wildlife_model_path: str = "./models/onnx/wildlife_species.onnx"
     fire_smoke_model_path: str = "./models/onnx/fire_smoke.onnx"
     behavior_model_path: str = "./models/onnx/animal_behavior.onnx"
